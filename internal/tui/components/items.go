@@ -94,39 +94,39 @@ func (d *WorkflowItemDelegate) Render(w io.Writer, m list.Model, index int, list
 	}
 
 	workflow := item.Workflow
-	
+
 	// Status icon and color
 	statusIcon := StatusIcon(workflow.State)
 	statusStyle := d.styles.StatusStyle(workflow.State)
-	
+
 	// Format the item with fuller display
 	name := workflow.Name
 	if len(name) > 50 {
 		name = name[:47] + "..."
 	}
-	
+
 	// Extract workflow filename from path
 	pathParts := strings.Split(workflow.Path, "/")
 	filename := pathParts[len(pathParts)-1]
 	if len(filename) > 30 {
 		filename = filename[:27] + "..."
 	}
-	
+
 	// Build the display string
 	status := statusStyle.Render(fmt.Sprintf("%s %s", statusIcon, workflow.State))
-	
+
 	// Single line: status, name, and filename
 	line := fmt.Sprintf("%s %s • %s", status, name, filename)
-	
+
 	// Apply selection styling
 	if index == m.Index() {
 		line = d.styles.SelectedItem().Render(line)
 	} else {
 		line = d.styles.ListItem().Render(line)
 	}
-	
+
 	// Write the output
-	fmt.Fprint(w, line)
+	_, _ = fmt.Fprint(w, line)
 }
 
 // WorkflowRunItem represents a workflow run in the list
@@ -172,14 +172,14 @@ func (d *WorkflowRunItemDelegate) Render(w io.Writer, m list.Model, index int, l
 	}
 
 	run := item.Run
-	
+
 	// Get detailed CI status
 	ciStatus := GetCIStatus(run.Status, run.Conclusion)
-	
+
 	// Status icon and color based on conclusion if completed, otherwise status
 	var statusIcon string
 	var statusStyle lipgloss.Style
-	
+
 	if run.Status == "completed" {
 		statusIcon = StatusIcon(run.Conclusion)
 		statusStyle = d.styles.StatusStyle(run.Conclusion)
@@ -187,31 +187,31 @@ func (d *WorkflowRunItemDelegate) Render(w io.Writer, m list.Model, index int, l
 		statusIcon = StatusIcon(run.Status)
 		statusStyle = d.styles.StatusStyle(run.Status)
 	}
-	
+
 	// Workflow name with run number (truncated)
 	name := fmt.Sprintf("%s(#%d)", run.Name, run.RunNumber)
 	if len(name) > 25 {
 		name = name[:22] + "..."
 	}
 	name = fmt.Sprintf("%-25s", name)
-	
+
 	// Status column (without styling yet)
 	statusText := fmt.Sprintf("%s %-10s", statusIcon, ciStatus)
-	
+
 	// Branch name (truncated)
 	branch := run.HeadBranch
 	if len(branch) > 18 {
 		branch = branch[:15] + "..."
 	}
 	branch = fmt.Sprintf("%-18s", branch)
-	
+
 	// Actor name (truncated)
 	actor := run.Actor.Login
 	if len(actor) > 15 {
 		actor = actor[:12] + "..."
 	}
 	actor = fmt.Sprintf("%-15s", actor)
-	
+
 	// PR information (truncated)
 	prInfo := ""
 	if len(run.PullRequests) > 0 {
@@ -227,7 +227,7 @@ func (d *WorkflowRunItemDelegate) Render(w io.Writer, m list.Model, index int, l
 		prInfo = "-"
 	}
 	prInfo = fmt.Sprintf("%-12s", prInfo)
-	
+
 	// Duration
 	durationStr := ""
 	if run.Status == "completed" && !run.RunStartedAt.IsZero() && !run.UpdatedAt.IsZero() {
@@ -246,14 +246,14 @@ func (d *WorkflowRunItemDelegate) Render(w io.Writer, m list.Model, index int, l
 		durationStr = "-"
 	}
 	durationStr = fmt.Sprintf("%-6s", durationStr)
-	
+
 	// Time formatting
 	timeStr := run.CreatedAt.Format("01-02 15:04")
-	
+
 	// Build table row
-	line := fmt.Sprintf("%s %s %s %s %s %s %s", 
+	line := fmt.Sprintf("%s %s %s %s %s %s %s",
 		name, statusText, branch, actor, prInfo, durationStr, timeStr)
-	
+
 	// Apply selection styling to the entire line, then apply status color to just the status part
 	if index == m.Index() {
 		line = d.styles.SelectedItem().Render(line)
@@ -262,12 +262,12 @@ func (d *WorkflowRunItemDelegate) Render(w io.Writer, m list.Model, index int, l
 		parts := []string{name, statusStyle.Render(statusText), branch, actor, prInfo, durationStr, timeStr}
 		line = strings.Join(parts, " ")
 		line = d.styles.ListItem().Render(line)
-		
+
 		// Add highlight for running workflows
 		if run.Status == "in_progress" || run.Status == "queued" {
 			line = lipgloss.NewStyle().Foreground(lipgloss.Color("226")).Render(line)
 		}
 	}
-	
-	fmt.Fprint(w, line)
+
+	_, _ = fmt.Fprint(w, line)
 }

@@ -82,26 +82,28 @@ func getRepoInfoFromConfig(gitDir string) (*RepoInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to open git config: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		_ = file.Close()
+	}()
 
 	scanner := bufio.NewScanner(file)
 	inRemoteOrigin := false
-	
+
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		
+
 		// Check if we're in the [remote "origin"] section
 		if strings.HasPrefix(line, "[remote \"origin\"]") {
 			inRemoteOrigin = true
 			continue
 		}
-		
+
 		// Check if we've moved to a different section
 		if strings.HasPrefix(line, "[") && !strings.HasPrefix(line, "[remote \"origin\"]") {
 			inRemoteOrigin = false
 			continue
 		}
-		
+
 		// If we're in the remote origin section and found the url
 		if inRemoteOrigin && strings.HasPrefix(line, "url = ") {
 			url := strings.TrimPrefix(line, "url = ")
@@ -119,9 +121,7 @@ func getRepoInfoFromConfig(gitDir string) (*RepoInfo, error) {
 // parseRemoteURL parses a git remote URL to extract owner and repo
 func parseRemoteURL(url string) (*RepoInfo, error) {
 	// Remove .git suffix if present
-	if strings.HasSuffix(url, ".git") {
-		url = strings.TrimSuffix(url, ".git")
-	}
+	url = strings.TrimSuffix(url, ".git")
 
 	// Handle different URL formats
 	if strings.HasPrefix(url, "https://github.com/") {

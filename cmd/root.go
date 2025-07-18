@@ -3,13 +3,12 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/ryo246912/gh-actions-dash/internal/git"
 	"github.com/ryo246912/gh-actions-dash/internal/github"
 	"github.com/ryo246912/gh-actions-dash/internal/tui"
 	"github.com/spf13/cobra"
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 var (
@@ -41,7 +40,7 @@ var rootCmd = &cobra.Command{
 			if err != nil {
 				return fmt.Errorf("failed to detect repository from current directory: %w\n\nPlease run this command in a git repository or specify owner and repo with --owner and --repo flags", err)
 			}
-			
+
 			if owner == "" {
 				owner = repoInfo.Owner
 			}
@@ -52,7 +51,7 @@ var rootCmd = &cobra.Command{
 
 		// Create TUI app
 		app := tui.NewApp(client, owner, repo)
-		
+
 		// Start the TUI
 		p := tea.NewProgram(app, tea.WithAltScreen())
 		if _, err := p.Run(); err != nil {
@@ -74,13 +73,4 @@ func Execute() {
 func init() {
 	rootCmd.Flags().StringVarP(&owner, "owner", "o", "", "Repository owner")
 	rootCmd.Flags().StringVarP(&repo, "repo", "r", "", "Repository name")
-}
-
-// parseRepoFlag parses a repository flag in the format "owner/repo"
-func parseRepoFlag(repoFlag string) (string, string, error) {
-	parts := strings.Split(repoFlag, "/")
-	if len(parts) != 2 {
-		return "", "", fmt.Errorf("invalid repository format, expected 'owner/repo'")
-	}
-	return parts[0], parts[1], nil
 }

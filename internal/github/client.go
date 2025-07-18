@@ -48,9 +48,9 @@ func categorizeError(err error) *GitHubError {
 	}
 
 	errorMsg := err.Error()
-	
+
 	// Check for authentication errors
-	if strings.Contains(errorMsg, "401") || strings.Contains(errorMsg, "authentication") || 
+	if strings.Contains(errorMsg, "401") || strings.Contains(errorMsg, "authentication") ||
 		strings.Contains(errorMsg, "Bad credentials") || strings.Contains(errorMsg, "token") {
 		return &GitHubError{
 			Type:    ErrorTypeAuth,
@@ -59,7 +59,7 @@ func categorizeError(err error) *GitHubError {
 			Err:     err,
 		}
 	}
-	
+
 	// Check for permission errors
 	if strings.Contains(errorMsg, "403") || strings.Contains(errorMsg, "Forbidden") {
 		return &GitHubError{
@@ -69,7 +69,7 @@ func categorizeError(err error) *GitHubError {
 			Err:     err,
 		}
 	}
-	
+
 	// Check for not found errors
 	if strings.Contains(errorMsg, "404") || strings.Contains(errorMsg, "Not Found") {
 		return &GitHubError{
@@ -79,7 +79,7 @@ func categorizeError(err error) *GitHubError {
 			Err:     err,
 		}
 	}
-	
+
 	// Check for rate limit errors
 	if strings.Contains(errorMsg, "429") || strings.Contains(errorMsg, "rate limit") {
 		return &GitHubError{
@@ -89,7 +89,7 @@ func categorizeError(err error) *GitHubError {
 			Err:     err,
 		}
 	}
-	
+
 	// Check for network errors
 	if strings.Contains(errorMsg, "connection") || strings.Contains(errorMsg, "timeout") ||
 		strings.Contains(errorMsg, "network") || strings.Contains(errorMsg, "dns") {
@@ -100,7 +100,7 @@ func categorizeError(err error) *GitHubError {
 			Err:     err,
 		}
 	}
-	
+
 	// Unknown error
 	return &GitHubError{
 		Type:    ErrorTypeUnknown,
@@ -112,7 +112,7 @@ func categorizeError(err error) *GitHubError {
 
 // RetryConfig defines retry configuration
 type RetryConfig struct {
-	MaxRetries int
+	MaxRetries   int
 	InitialDelay time.Duration
 	MaxDelay     time.Duration
 }
@@ -131,7 +131,7 @@ func isRetryableError(err error) bool {
 	if err == nil {
 		return false
 	}
-	
+
 	errorMsg := err.Error()
 	// Network errors that should be retried
 	retryableErrors := []string{
@@ -149,47 +149,47 @@ func isRetryableError(err error) bool {
 		"503", // Service Unavailable
 		"504", // Gateway Timeout
 	}
-	
+
 	for _, retryable := range retryableErrors {
 		if strings.Contains(strings.ToLower(errorMsg), retryable) {
 			return true
 		}
 	}
-	
+
 	return false
 }
 
 // retryWithBackoff executes a function with exponential backoff retry
 func retryWithBackoff(config RetryConfig, operation func() error) error {
 	var lastErr error
-	
+
 	for attempt := 0; attempt <= config.MaxRetries; attempt++ {
 		err := operation()
 		if err == nil {
 			return nil
 		}
-		
+
 		lastErr = err
-		
+
 		// Don't retry on the last attempt
 		if attempt == config.MaxRetries {
 			break
 		}
-		
+
 		// Only retry if it's a retryable error
 		if !isRetryableError(err) {
 			break
 		}
-		
+
 		// Calculate delay with exponential backoff
 		delay := config.InitialDelay * time.Duration(1<<attempt)
 		if delay > config.MaxDelay {
 			delay = config.MaxDelay
 		}
-		
+
 		time.Sleep(delay)
 	}
-	
+
 	return lastErr
 }
 
@@ -246,7 +246,7 @@ func (c *Client) GetWorkflows(owner, repo string) ([]models.Workflow, error) {
 	err := retryWithBackoff(c.retryConfig, func() error {
 		return c.restClient.Get(fmt.Sprintf("repos/%s/%s/actions/workflows", owner, repo), &response)
 	})
-	
+
 	if err != nil {
 		return nil, categorizeError(err)
 	}
@@ -262,11 +262,11 @@ func (c *Client) GetWorkflowsPaginated(owner, repo string, page, perPage int) ([
 	}{}
 
 	endpoint := fmt.Sprintf("repos/%s/%s/actions/workflows?page=%d&per_page=%d", owner, repo, page, perPage)
-	
+
 	err := retryWithBackoff(c.retryConfig, func() error {
 		return c.restClient.Get(endpoint, &response)
 	})
-	
+
 	if err != nil {
 		return nil, 0, categorizeError(err)
 	}
@@ -283,7 +283,7 @@ func (c *Client) GetWorkflowRuns(owner, repo string, workflowID int64) ([]models
 	err := retryWithBackoff(c.retryConfig, func() error {
 		return c.restClient.Get(fmt.Sprintf("repos/%s/%s/actions/workflows/%d/runs", owner, repo, workflowID), &response)
 	})
-	
+
 	if err != nil {
 		return nil, categorizeError(err)
 	}
@@ -300,7 +300,7 @@ func (c *Client) GetWorkflowRunJobs(owner, repo string, runID int64) ([]models.J
 	err := retryWithBackoff(c.retryConfig, func() error {
 		return c.restClient.Get(fmt.Sprintf("repos/%s/%s/actions/runs/%d/jobs", owner, repo, runID), &response)
 	})
-	
+
 	if err != nil {
 		return nil, categorizeError(err)
 	}
@@ -317,7 +317,7 @@ func (c *Client) GetAllWorkflowRuns(owner, repo string) ([]models.WorkflowRun, e
 	err := retryWithBackoff(c.retryConfig, func() error {
 		return c.restClient.Get(fmt.Sprintf("repos/%s/%s/actions/runs", owner, repo), &response)
 	})
-	
+
 	if err != nil {
 		return nil, categorizeError(err)
 	}
@@ -329,15 +329,15 @@ func (c *Client) GetAllWorkflowRuns(owner, repo string) ([]models.WorkflowRun, e
 func (c *Client) GetAllWorkflowRunsPaginated(owner, repo string, page, perPage int) ([]models.WorkflowRun, int, error) {
 	response := struct {
 		WorkflowRuns []models.WorkflowRun `json:"workflow_runs"`
-		TotalCount   int                 `json:"total_count"`
+		TotalCount   int                  `json:"total_count"`
 	}{}
 
 	endpoint := fmt.Sprintf("repos/%s/%s/actions/runs?page=%d&per_page=%d", owner, repo, page, perPage)
-	
+
 	err := retryWithBackoff(c.retryConfig, func() error {
 		return c.restClient.Get(endpoint, &response)
 	})
-	
+
 	if err != nil {
 		return nil, 0, categorizeError(err)
 	}
@@ -355,7 +355,7 @@ func (c *Client) GetWorkflowRunLogs(owner, repo string, runID int64) (string, er
 		if fallbackErr != nil {
 			return "", categorizeError(fallbackErr)
 		}
-		
+
 		// Add notice about log download failure
 		var content strings.Builder
 		content.WriteString("⚠️  ログダウンロードに失敗しました。ジョブ・ステップ情報を表示します。\n")
@@ -372,10 +372,10 @@ func (c *Client) GetWorkflowRunLogs(owner, repo string, runID int64) (string, er
 		content.WriteString("\n\n")
 		content.WriteString("=" + strings.Repeat("=", 60) + "\n\n")
 		content.WriteString(fallbackLogs)
-		
+
 		return content.String(), nil
 	}
-	
+
 	return actualLogs, nil
 }
 
@@ -383,59 +383,63 @@ func (c *Client) GetWorkflowRunLogs(owner, repo string, runID int64) (string, er
 func (c *Client) downloadWorkflowRunLogs(owner, repo string, runID int64) (string, error) {
 	// The GitHub API endpoint for workflow run logs
 	endpoint := fmt.Sprintf("repos/%s/%s/actions/runs/%d/logs", owner, repo, runID)
-	
+
 	// Use gh CLI's HTTP client for authentication
 	httpClient, err := api.DefaultHTTPClient()
 	if err != nil {
 		return "", fmt.Errorf("failed to create HTTP client: %w", err)
 	}
-	
+
 	// Create HTTP client that doesn't follow redirects
 	httpClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		return http.ErrUseLastResponse
 	}
-	
+
 	// Make a request to get the redirect URL
 	req, err := http.NewRequest("GET", fmt.Sprintf("https://api.github.com/%s", endpoint), nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
-	
+
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
-	
+
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to make request: %w", err)
 	}
-	defer resp.Body.Close()
-	
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
 	if resp.StatusCode != http.StatusFound {
 		return "", fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
-	
+
 	// Get the redirect URL
 	location := resp.Header.Get("Location")
 	if location == "" {
 		return "", fmt.Errorf("no redirect location found")
 	}
-	
+
 	// Download the ZIP file
 	zipResp, err := http.Get(location)
 	if err != nil {
 		return "", fmt.Errorf("failed to download logs: %w", err)
 	}
-	defer zipResp.Body.Close()
-	
+	defer func() {
+		_ = zipResp.Body.Close()
+	}()
+
 	if zipResp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("failed to download logs: status %d", zipResp.StatusCode)
 	}
-	
+
 	// Read the ZIP file into memory
 	zipData, err := io.ReadAll(zipResp.Body)
 	if err != nil {
 		return "", fmt.Errorf("failed to read zip data: %w", err)
 	}
-	
+
 	// Extract and parse the ZIP file
 	return c.extractLogsFromZip(zipData)
 }
@@ -446,37 +450,36 @@ func (c *Client) extractLogsFromZip(zipData []byte) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to create zip reader: %w", err)
 	}
-	
+
 	var logContent strings.Builder
-	
+
 	// Process each file in the ZIP
 	for _, file := range reader.File {
 		if file.FileInfo().IsDir() {
 			continue
 		}
-		
+
 		// Open the file within the ZIP
 		rc, err := file.Open()
 		if err != nil {
 			continue // Skip files that can't be opened
 		}
-		
+
 		// Read the file content
 		content, err := io.ReadAll(rc)
-		rc.Close()
+		_ = rc.Close()
 		if err != nil {
 			continue // Skip files that can't be read
 		}
-		
+
 		// Add file header and content
 		logContent.WriteString(fmt.Sprintf("=== %s ===\n", file.Name))
 		logContent.WriteString(string(content))
 		logContent.WriteString("\n\n")
 	}
-	
+
 	return logContent.String(), nil
 }
-
 
 // getJobStepInfo is the fallback method that returns job/step information
 func (c *Client) getJobStepInfo(owner, repo string, runID int64) (string, error) {
@@ -491,11 +494,12 @@ func (c *Client) getJobStepInfo(owner, repo string, runID int64) (string, error)
 
 	var logContent strings.Builder
 	logContent.WriteString(fmt.Sprintf("📊 ジョブ・ステップ情報 (合計: %d ジョブ)\n\n", len(jobs)))
-	
+
 	for i, job := range jobs {
 		// Job header with status icon
 		statusIcon := "○"
-		if job.Status == "completed" {
+		switch job.Status {
+		case "completed":
 			switch job.Conclusion {
 			case "success":
 				statusIcon = "✅"
@@ -506,17 +510,17 @@ func (c *Client) getJobStepInfo(owner, repo string, runID int64) (string, error)
 			case "skipped":
 				statusIcon = "⏭️"
 			}
-		} else if job.Status == "in_progress" {
+		case "in_progress":
 			statusIcon = "🔄"
 		}
-		
+
 		logContent.WriteString(fmt.Sprintf("=== %s Job %d: %s ===\n", statusIcon, i+1, job.Name))
 		logContent.WriteString(fmt.Sprintf("📋 Status: %s", job.Status))
 		if job.Conclusion != "" {
 			logContent.WriteString(fmt.Sprintf(" (%s)", job.Conclusion))
 		}
 		logContent.WriteString("\n")
-		
+
 		// Timing information
 		if !job.StartedAt.IsZero() {
 			logContent.WriteString(fmt.Sprintf("⏰ Started: %s\n", job.StartedAt.Format("2006-01-02 15:04:05")))
@@ -529,13 +533,14 @@ func (c *Client) getJobStepInfo(owner, repo string, runID int64) (string, error)
 			}
 		}
 		logContent.WriteString("\n")
-		
+
 		// Steps information
 		if len(job.Steps) > 0 {
 			logContent.WriteString(fmt.Sprintf("📋 Steps (%d):\n", len(job.Steps)))
 			for j, step := range job.Steps {
 				stepIcon := "○"
-				if step.Status == "completed" {
+				switch step.Status {
+				case "completed":
 					switch step.Conclusion {
 					case "success":
 						stepIcon = "✅"
@@ -546,10 +551,10 @@ func (c *Client) getJobStepInfo(owner, repo string, runID int64) (string, error)
 					case "skipped":
 						stepIcon = "⏭️"
 					}
-				} else if step.Status == "in_progress" {
+				case "in_progress":
 					stepIcon = "🔄"
 				}
-				
+
 				logContent.WriteString(fmt.Sprintf("  %d. %s %s", j+1, stepIcon, step.Name))
 				if step.Status != "" {
 					logContent.WriteString(fmt.Sprintf(" (%s", step.Status))
@@ -559,7 +564,7 @@ func (c *Client) getJobStepInfo(owner, repo string, runID int64) (string, error)
 					logContent.WriteString(")")
 				}
 				logContent.WriteString("\n")
-				
+
 				// Step timing
 				if !step.StartedAt.IsZero() && !step.CompletedAt.IsZero() {
 					duration := step.CompletedAt.Sub(step.StartedAt)

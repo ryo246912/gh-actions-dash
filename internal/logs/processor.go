@@ -46,7 +46,7 @@ func (p *Processor) processLine(line string) string {
 	// Use ansi package to strip and process sequences
 	// For now, we'll use a basic approach to preserve colors
 	// while ensuring proper rendering in the TUI
-	
+
 	// Create a style that preserves ANSI sequences
 	rendered := p.renderANSILine(line)
 	return rendered
@@ -57,33 +57,33 @@ func (p *Processor) renderANSILine(line string) string {
 	// Parse ANSI sequences and convert to lipgloss styles
 	result := ""
 	currentPos := 0
-	
+
 	// Find ANSI escape sequences
 	ansiRegex := regexp.MustCompile(`\x1b\[[0-9;]*m`)
 	matches := ansiRegex.FindAllStringIndex(line, -1)
-	
+
 	currentStyle := p.baseStyle
-	
+
 	for _, match := range matches {
 		// Add text before this ANSI sequence
 		if match[0] > currentPos {
 			text := line[currentPos:match[0]]
 			result += currentStyle.Render(text)
 		}
-		
+
 		// Process the ANSI sequence
 		sequence := line[match[0]:match[1]]
 		currentStyle = p.updateStyleFromANSI(currentStyle, sequence)
-		
+
 		currentPos = match[1]
 	}
-	
+
 	// Add remaining text
 	if currentPos < len(line) {
 		text := line[currentPos:]
 		result += currentStyle.Render(text)
 	}
-	
+
 	return result
 }
 
@@ -94,15 +94,15 @@ func (p *Processor) updateStyleFromANSI(style lipgloss.Style, sequence string) l
 	if len(sequence) < 4 {
 		return style
 	}
-	
+
 	codes := strings.TrimSuffix(strings.TrimPrefix(sequence, "\x1b["), "m")
 	if codes == "" {
 		codes = "0"
 	}
-	
+
 	// Split multiple codes
 	parts := strings.Split(codes, ";")
-	
+
 	for _, part := range parts {
 		switch part {
 		case "0": // Reset
@@ -149,7 +149,7 @@ func (p *Processor) updateStyleFromANSI(style lipgloss.Style, sequence string) l
 			style = style.Foreground(lipgloss.Color("#ffffff"))
 		}
 	}
-	
+
 	return style
 }
 

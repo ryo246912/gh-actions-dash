@@ -7,34 +7,34 @@ import (
 // Styles defines the styling for the TUI
 type Styles struct {
 	// Base styles
-	Base      lipgloss.Style
-	Title     lipgloss.Style
-	Subtitle  lipgloss.Style
-	
+	Base     lipgloss.Style
+	Title    lipgloss.Style
+	Subtitle lipgloss.Style
+
 	// List styles
 	List         lipgloss.Style
 	listItem     lipgloss.Style
 	selectedItem lipgloss.Style
-	
+
 	// Status styles
-	StatusSuccess lipgloss.Style
-	StatusFailure lipgloss.Style
-	StatusPending lipgloss.Style
+	StatusSuccess    lipgloss.Style
+	StatusFailure    lipgloss.Style
+	StatusPending    lipgloss.Style
 	StatusInProgress lipgloss.Style
-	StatusSkipped lipgloss.Style
-	
+	StatusSkipped    lipgloss.Style
+
 	// Border styles
-	Border        lipgloss.Style
-	ActiveBorder  lipgloss.Style
-	
+	Border       lipgloss.Style
+	ActiveBorder lipgloss.Style
+
 	// Content styles
-	Content       lipgloss.Style
-	Sidebar       lipgloss.Style
-	
+	Content lipgloss.Style
+	Sidebar lipgloss.Style
+
 	// Help styles
-	Help          lipgloss.Style
-	HelpKey       lipgloss.Style
-	HelpDesc      lipgloss.Style
+	Help     lipgloss.Style
+	HelpKey  lipgloss.Style
+	HelpDesc lipgloss.Style
 }
 
 // ListItem returns the list item style
@@ -76,86 +76,86 @@ func (s Styles) GetStatusInProgress() lipgloss.Style {
 func DefaultStyles() Styles {
 	var (
 		// Colors
-		primaryColor   = lipgloss.Color("#7c3aed")
-		successColor   = lipgloss.Color("#22c55e")
-		failureColor   = lipgloss.Color("#ef4444")
-		warningColor   = lipgloss.Color("#f59e0b")
-		infoColor      = lipgloss.Color("#3b82f6")
-		mutedColor     = lipgloss.Color("#6b7280")
-		borderColor    = lipgloss.Color("#374151")
+		primaryColor      = lipgloss.Color("#7c3aed")
+		successColor      = lipgloss.Color("#22c55e")
+		failureColor      = lipgloss.Color("#ef4444")
+		warningColor      = lipgloss.Color("#f59e0b")
+		infoColor         = lipgloss.Color("#3b82f6")
+		mutedColor        = lipgloss.Color("#6b7280")
+		borderColor       = lipgloss.Color("#374151")
 		activeBorderColor = lipgloss.Color("#7c3aed")
-		
+
 		// Common styles
 		baseBorder = lipgloss.NewStyle().
-			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(borderColor)
+				BorderStyle(lipgloss.RoundedBorder()).
+				BorderForeground(borderColor)
 	)
 
 	return Styles{
 		Base: lipgloss.NewStyle().
 			Padding(0, 1),
-		
+
 		Title: lipgloss.NewStyle().
 			Foreground(primaryColor).
 			Bold(true).
 			Padding(0, 1),
-		
+
 		Subtitle: lipgloss.NewStyle().
 			Foreground(mutedColor).
 			Padding(0, 1),
-		
-		List: baseBorder.Copy().
+
+		List: baseBorder.
 			Padding(1, 2),
-		
+
 		listItem: lipgloss.NewStyle().
 			Padding(0, 1),
-		
+
 		selectedItem: lipgloss.NewStyle().
 			Foreground(primaryColor).
 			Background(lipgloss.Color("#1e1b4b")).
 			Padding(0, 1),
-		
+
 		StatusSuccess: lipgloss.NewStyle().
 			Foreground(successColor).
 			Bold(true),
-		
+
 		StatusFailure: lipgloss.NewStyle().
 			Foreground(failureColor).
 			Bold(true),
-		
+
 		StatusPending: lipgloss.NewStyle().
 			Foreground(warningColor).
 			Bold(true),
-		
+
 		StatusInProgress: lipgloss.NewStyle().
 			Foreground(infoColor).
 			Bold(true),
-		
+
 		StatusSkipped: lipgloss.NewStyle().
 			Foreground(mutedColor).
 			Bold(true),
-		
-		Border: baseBorder.Copy(),
-		
-		ActiveBorder: baseBorder.Copy().
+
+		Border: baseBorder,
+
+		ActiveBorder: baseBorder.
 			BorderForeground(activeBorderColor),
-		
-		Content: baseBorder.Copy().
+
+		Content: baseBorder.
 			Padding(1, 2).
 			AlignHorizontal(lipgloss.Left),
-		
-		Sidebar: baseBorder.Copy().
+
+		Sidebar: baseBorder.
 			Padding(1, 2).
 			Width(30),
-		
+
 		Help: lipgloss.NewStyle().
 			Foreground(mutedColor).
 			Padding(1, 2),
-		
+
 		HelpKey: lipgloss.NewStyle().
 			Foreground(primaryColor).
 			Bold(true),
-		
+
 		HelpDesc: lipgloss.NewStyle().
 			Foreground(mutedColor),
 	}
@@ -178,4 +178,3 @@ func (s Styles) StatusStyle(status string) lipgloss.Style {
 		return s.Base
 	}
 }
-

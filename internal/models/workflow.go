@@ -4,44 +4,44 @@ import "time"
 
 // Workflow represents a GitHub Actions workflow
 type Workflow struct {
-	ID          int64     `json:"id"`
-	Name        string    `json:"name"`
-	State       string    `json:"state"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-	URL         string    `json:"url"`
-	HTMLUrl     string    `json:"html_url"`
-	BadgeURL    string    `json:"badge_url"`
-	Path        string    `json:"path"`
-	NodeID      string    `json:"node_id"`
+	ID        int64     `json:"id"`
+	Name      string    `json:"name"`
+	State     string    `json:"state"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	URL       string    `json:"url"`
+	HTMLUrl   string    `json:"html_url"`
+	BadgeURL  string    `json:"badge_url"`
+	Path      string    `json:"path"`
+	NodeID    string    `json:"node_id"`
 }
 
 // WorkflowRun represents a GitHub Actions workflow run
 type WorkflowRun struct {
-	ID           int64           `json:"id"`
-	Name         string          `json:"name"`
-	NodeID       string          `json:"node_id"`
-	CheckSuiteID int64           `json:"check_suite_id"`
-	HeadBranch   string          `json:"head_branch"`
-	HeadSha      string          `json:"head_sha"`
-	Path         string          `json:"path"`
-	RunNumber    int             `json:"run_number"`
-	Event        string          `json:"event"`
-	Status       string          `json:"status"`
-	Conclusion   string          `json:"conclusion"`
-	WorkflowID   int64           `json:"workflow_id"`
-	URL          string          `json:"url"`
-	HTMLURL      string          `json:"html_url"`
-	CreatedAt    time.Time       `json:"created_at"`
-	UpdatedAt    time.Time       `json:"updated_at"`
-	RunStartedAt time.Time       `json:"run_started_at"`
-	JobsURL      string          `json:"jobs_url"`
-	LogsURL      string          `json:"logs_url"`
-	RunAttempt   int             `json:"run_attempt"`
-	Actor        Actor           `json:"actor"`
-	HeadCommit   Commit          `json:"head_commit"`
-	Repository   Repository      `json:"repository"`
-	PullRequests []PullRequest   `json:"pull_requests"`
+	ID           int64         `json:"id"`
+	Name         string        `json:"name"`
+	NodeID       string        `json:"node_id"`
+	CheckSuiteID int64         `json:"check_suite_id"`
+	HeadBranch   string        `json:"head_branch"`
+	HeadSha      string        `json:"head_sha"`
+	Path         string        `json:"path"`
+	RunNumber    int           `json:"run_number"`
+	Event        string        `json:"event"`
+	Status       string        `json:"status"`
+	Conclusion   string        `json:"conclusion"`
+	WorkflowID   int64         `json:"workflow_id"`
+	URL          string        `json:"url"`
+	HTMLURL      string        `json:"html_url"`
+	CreatedAt    time.Time     `json:"created_at"`
+	UpdatedAt    time.Time     `json:"updated_at"`
+	RunStartedAt time.Time     `json:"run_started_at"`
+	JobsURL      string        `json:"jobs_url"`
+	LogsURL      string        `json:"logs_url"`
+	RunAttempt   int           `json:"run_attempt"`
+	Actor        Actor         `json:"actor"`
+	HeadCommit   Commit        `json:"head_commit"`
+	Repository   Repository    `json:"repository"`
+	PullRequests []PullRequest `json:"pull_requests"`
 }
 
 // Job represents a job in a workflow run

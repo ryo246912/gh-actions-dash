@@ -5,29 +5,28 @@ import "github.com/charmbracelet/bubbles/key"
 // KeyMap defines the key bindings for the TUI
 type KeyMap struct {
 	// Navigation
-	Up      key.Binding
-	Down    key.Binding
-	Left    key.Binding
-	Right   key.Binding
-	PageUp  key.Binding
+	Up       key.Binding
+	Down     key.Binding
+	Left     key.Binding
+	Right    key.Binding
+	PageUp   key.Binding
 	PageDown key.Binding
-	Home    key.Binding
-	End     key.Binding
+	Home     key.Binding
+	End      key.Binding
 
 	// Actions
 	Enter   key.Binding
 	Refresh key.Binding
 	Back    key.Binding
-	
+
 	// Application
-	Quit    key.Binding
-	Help    key.Binding
-	
-	
+	Quit key.Binding
+	Help key.Binding
+
 	// View switching
 	NextTab key.Binding
 	PrevTab key.Binding
-	
+
 	// Pagination
 	NextPage key.Binding
 	PrevPage key.Binding
@@ -94,7 +93,6 @@ func DefaultKeyMap() KeyMap {
 			key.WithHelp("?", "help"),
 		),
 
-
 		// View switching
 		NextTab: key.NewBinding(
 			key.WithKeys("tab"),
@@ -104,7 +102,7 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("shift+tab"),
 			key.WithHelp("shift+tab", "previous tab"),
 		),
-		
+
 		// Pagination
 		NextPage: key.NewBinding(
 			key.WithKeys("n"),

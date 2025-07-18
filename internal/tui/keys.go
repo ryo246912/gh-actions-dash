@@ -27,6 +27,10 @@ type KeyMap struct {
 	// View switching
 	NextTab key.Binding
 	PrevTab key.Binding
+	
+	// Pagination
+	NextPage key.Binding
+	PrevPage key.Binding
 }
 
 // DefaultKeyMap returns a default key map
@@ -100,6 +104,16 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("shift+tab"),
 			key.WithHelp("shift+tab", "previous tab"),
 		),
+		
+		// Pagination
+		NextPage: key.NewBinding(
+			key.WithKeys("n"),
+			key.WithHelp("n", "next page"),
+		),
+		PrevPage: key.NewBinding(
+			key.WithKeys("p"),
+			key.WithHelp("p", "previous page"),
+		),
 	}
 }
 
@@ -115,6 +129,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		{k.PageUp, k.PageDown, k.Home, k.End},
 		{k.Enter, k.Refresh, k.Back},
 		{k.NextTab, k.PrevTab},
+		{k.NextPage, k.PrevPage},
 		{k.Help, k.Quit},
 	}
 }

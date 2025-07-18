@@ -73,6 +73,14 @@ type App struct {
 	watchMode     bool
 	watchInterval time.Duration
 	lastUpdated   time.Time
+	
+	// Pagination state
+	workflowsPage     int
+	workflowsPerPage  int
+	workflowsTotal    int
+	allRunsPage       int
+	allRunsPerPage    int
+	allRunsTotal      int
 }
 
 // NewApp creates a new TUI application
@@ -123,13 +131,17 @@ func NewApp(client *github.Client, owner, repo string) *App {
 		loading:      true,
 		watchMode:    false,
 		watchInterval: 10 * time.Second,
+		workflowsPage:    1,
+		workflowsPerPage: 100,
+		allRunsPage:      1,
+		allRunsPerPage:   100,
 	}
 }
 
 // Init initializes the application
 func (a *App) Init() tea.Cmd {
 	return tea.Batch(
-		a.loadAllRuns(),
+		a.loadAllRunsPaginated(),
 		tea.EnterAltScreen,
 	)
 }
@@ -179,6 +191,40 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		
 	case allRunsLoadedMsg:
 		a.allRuns = msg.runs
+		a.loading = false
+		a.lastUpdated = time.Now()
+		a.updateAllRunsList()
+		
+		// Load jobs for the first run if available
+		var cmd tea.Cmd
+		if len(a.allRuns) > 0 {
+			cmd = a.loadWorkflowRunJobs(a.allRuns[0].ID)
+		}
+		
+		// Auto-enable watch mode if there are running workflows
+		if !a.watchMode && a.hasRunningWorkflows() {
+			a.watchMode = true
+		}
+		
+		// Start watch mode if enabled
+		if a.watchMode {
+			return a, tea.Batch(cmd, a.watchTick())
+		}
+		
+		return a, cmd
+		
+	case workflowsPaginatedLoadedMsg:
+		a.workflows = msg.workflows
+		a.workflowsTotal = msg.total
+		a.workflowsPage = msg.page
+		a.loading = false
+		a.updateWorkflowList()
+		return a, nil
+		
+	case allRunsPaginatedLoadedMsg:
+		a.allRuns = msg.runs
+		a.allRunsTotal = msg.total
+		a.allRunsPage = msg.page
 		a.loading = false
 		a.lastUpdated = time.Now()
 		a.updateAllRunsList()
@@ -271,6 +317,12 @@ func (a *App) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// h key acts as Esc for backward navigation
 		return a.goBack()
 		
+	case key.Matches(msg, a.keyMap.NextPage):
+		return a.handleNextPage()
+		
+	case key.Matches(msg, a.keyMap.PrevPage):
+		return a.handlePrevPage()
+		
 	}
 	
 	// Handle log scrolling for logs view
@@ -287,7 +339,7 @@ func (a *App) switchToWorkflowsView() (tea.Model, tea.Cmd) {
 	if a.viewState == AllRunsView {
 		a.viewState = WorkflowListView
 		a.loading = true
-		return a, a.loadWorkflows()
+		return a, a.loadWorkflowsPaginated()
 	}
 	return a, nil
 }
@@ -298,7 +350,7 @@ func (a *App) switchToAllRunsView() (tea.Model, tea.Cmd) {
 		a.viewState = AllRunsView
 		a.currentWorkflow = nil
 		a.loading = true
-		return a, a.loadAllRuns()
+		return a, a.loadAllRunsPaginated()
 	}
 	return a, nil
 }
@@ -372,9 +424,9 @@ func (a *App) refresh() (tea.Model, tea.Cmd) {
 	
 	switch a.viewState {
 	case AllRunsView:
-		return a, a.loadAllRuns()
+		return a, a.loadAllRunsPaginated()
 	case WorkflowListView:
-		return a, a.loadWorkflows()
+		return a, a.loadWorkflowsPaginated()
 	case WorkflowRunsView:
 		if a.currentWorkflow != nil {
 			return a, a.loadWorkflowRuns(a.currentWorkflow.ID)
@@ -528,7 +580,13 @@ func (a *App) updateAllRunsList() {
 func (a *App) renderWorkflowListView() string {
 	header := a.styles.GetTitle().Render(fmt.Sprintf("GitHub Actions - %s/%s", a.owner, a.repo))
 	
-	help := a.styles.GetHelp().Render("Enter: View runs • a: All runs • r: Refresh • q: Quit")
+	help := a.styles.GetHelp().Render("Enter: View runs • a: All runs • r: Refresh • n: Next page • p: Prev page • q: Quit")
+	
+	// Pagination info
+	paginationInfo := ""
+	if a.workflowsTotal > 0 {
+		paginationInfo = a.styles.GetHelp().Render(a.getPaginationInfo(a.workflowsPage, a.workflowsTotal, a.workflowsPerPage))
+	}
 	
 	// Left side - workflow list
 	var leftMainContent string
@@ -547,11 +605,15 @@ func (a *App) renderWorkflowListView() string {
 		leftMainContent = listView
 	}
 	
+	leftContentParts := []string{header, leftMainContent}
+	if paginationInfo != "" {
+		leftContentParts = append(leftContentParts, paginationInfo)
+	}
+	leftContentParts = append(leftContentParts, help)
+	
 	leftContent := lipgloss.JoinVertical(
 		lipgloss.Left,
-		header,
-		leftMainContent,
-		help,
+		leftContentParts...,
 	)
 	
 	// Right side - preview panel
@@ -609,7 +671,13 @@ func (a *App) renderAllRunsView() string {
 	} else {
 		watchStatus = " • t: Start watch"
 	}
-	help := a.styles.GetHelp().Render("Enter: View logs • w: Workflows • r: Refresh" + watchStatus + " • q: Quit")
+	help := a.styles.GetHelp().Render("Enter: View logs • w: Workflows • r: Refresh" + watchStatus + " • n: Next page • p: Prev page • q: Quit")
+	
+	// Pagination info
+	paginationInfo := ""
+	if a.allRunsTotal > 0 {
+		paginationInfo = a.styles.GetHelp().Render(a.getPaginationInfo(a.allRunsPage, a.allRunsTotal, a.allRunsPerPage))
+	}
 	
 	// Left side - all runs list
 	var leftMainContent string
@@ -634,11 +702,15 @@ func (a *App) renderAllRunsView() string {
 		)
 	}
 	
+	leftContentParts := []string{header, leftMainContent}
+	if paginationInfo != "" {
+		leftContentParts = append(leftContentParts, paginationInfo)
+	}
+	leftContentParts = append(leftContentParts, help)
+	
 	leftContent := lipgloss.JoinVertical(
 		lipgloss.Left,
-		header,
-		leftMainContent,
-		help,
+		leftContentParts...,
 	)
 	
 	// Right side - preview panel
@@ -812,6 +884,18 @@ type watchTickMsg struct {
 	timestamp time.Time
 }
 
+type workflowsPaginatedLoadedMsg struct {
+	workflows []models.Workflow
+	total     int
+	page      int
+}
+
+type allRunsPaginatedLoadedMsg struct {
+	runs  []models.WorkflowRun
+	total int
+	page  int
+}
+
 // Commands
 func (a *App) loadWorkflows() tea.Cmd {
 	return tea.Cmd(func() tea.Msg {
@@ -823,6 +907,16 @@ func (a *App) loadWorkflows() tea.Cmd {
 	})
 }
 
+func (a *App) loadWorkflowsPaginated() tea.Cmd {
+	return tea.Cmd(func() tea.Msg {
+		workflows, total, err := a.client.GetWorkflowsPaginated(a.owner, a.repo, a.workflowsPage, a.workflowsPerPage)
+		if err != nil {
+			return errorMsg{err: err}
+		}
+		return workflowsPaginatedLoadedMsg{workflows: workflows, total: total, page: a.workflowsPage}
+	})
+}
+
 func (a *App) loadAllRuns() tea.Cmd {
 	return tea.Cmd(func() tea.Msg {
 		allRuns, err := a.client.GetAllWorkflowRuns(a.owner, a.repo)
@@ -830,6 +924,16 @@ func (a *App) loadAllRuns() tea.Cmd {
 			return errorMsg{err: err}
 		}
 		return allRunsLoadedMsg{runs: allRuns}
+	})
+}
+
+func (a *App) loadAllRunsPaginated() tea.Cmd {
+	return tea.Cmd(func() tea.Msg {
+		allRuns, total, err := a.client.GetAllWorkflowRunsPaginated(a.owner, a.repo, a.allRunsPage, a.allRunsPerPage)
+		if err != nil {
+			return errorMsg{err: err}
+		}
+		return allRunsPaginatedLoadedMsg{runs: allRuns, total: total, page: a.allRunsPage}
 	})
 }
 
@@ -892,9 +996,9 @@ func (a *App) watchTick() tea.Cmd {
 func (a *App) autoRefresh() tea.Cmd {
 	switch a.viewState {
 	case AllRunsView:
-		return a.loadAllRuns()
+		return a.loadAllRunsPaginated()
 	case WorkflowListView:
-		return a.loadWorkflows()
+		return a.loadWorkflowsPaginated()
 	case WorkflowRunsView:
 		if a.currentWorkflow != nil {
 			return a.loadWorkflowRuns(a.currentWorkflow.ID)
@@ -906,6 +1010,66 @@ func (a *App) autoRefresh() tea.Cmd {
 	}
 	
 	return nil
+}
+
+// handleNextPage handles next page navigation
+func (a *App) handleNextPage() (tea.Model, tea.Cmd) {
+	switch a.viewState {
+	case AllRunsView:
+		if a.canGoToNextPage(a.allRunsPage, a.allRunsTotal, a.allRunsPerPage) {
+			a.allRunsPage++
+			a.loading = true
+			return a, a.loadAllRunsPaginated()
+		}
+	case WorkflowListView:
+		if a.canGoToNextPage(a.workflowsPage, a.workflowsTotal, a.workflowsPerPage) {
+			a.workflowsPage++
+			a.loading = true
+			return a, a.loadWorkflowsPaginated()
+		}
+	}
+	return a, nil
+}
+
+// handlePrevPage handles previous page navigation
+func (a *App) handlePrevPage() (tea.Model, tea.Cmd) {
+	switch a.viewState {
+	case AllRunsView:
+		if a.allRunsPage > 1 {
+			a.allRunsPage--
+			a.loading = true
+			return a, a.loadAllRunsPaginated()
+		}
+	case WorkflowListView:
+		if a.workflowsPage > 1 {
+			a.workflowsPage--
+			a.loading = true
+			return a, a.loadWorkflowsPaginated()
+		}
+	}
+	return a, nil
+}
+
+// canGoToNextPage checks if there is a next page
+func (a *App) canGoToNextPage(currentPage, total, perPage int) bool {
+	maxPages := (total + perPage - 1) / perPage
+	return currentPage < maxPages
+}
+
+// getPaginationInfo returns pagination information string
+func (a *App) getPaginationInfo(currentPage, total, perPage int) string {
+	if total == 0 {
+		return ""
+	}
+	
+	maxPages := (total + perPage - 1) / perPage
+	start := (currentPage-1)*perPage + 1
+	end := currentPage * perPage
+	if end > total {
+		end = total
+	}
+	
+	return fmt.Sprintf("Page %d/%d (%d-%d of %d)", currentPage, maxPages, start, end, total)
 }
 
 // hasRunningWorkflows checks if there are any running workflows

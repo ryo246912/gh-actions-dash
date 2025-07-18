@@ -254,6 +254,26 @@ func (c *Client) GetWorkflows(owner, repo string) ([]models.Workflow, error) {
 	return response.Workflows, nil
 }
 
+// GetWorkflowsPaginated returns workflows for a repository with pagination support
+func (c *Client) GetWorkflowsPaginated(owner, repo string, page, perPage int) ([]models.Workflow, int, error) {
+	response := struct {
+		Workflows  []models.Workflow `json:"workflows"`
+		TotalCount int               `json:"total_count"`
+	}{}
+
+	endpoint := fmt.Sprintf("repos/%s/%s/actions/workflows?page=%d&per_page=%d", owner, repo, page, perPage)
+	
+	err := retryWithBackoff(c.retryConfig, func() error {
+		return c.restClient.Get(endpoint, &response)
+	})
+	
+	if err != nil {
+		return nil, 0, categorizeError(err)
+	}
+
+	return response.Workflows, response.TotalCount, nil
+}
+
 // GetWorkflowRuns returns workflow runs for a workflow
 func (c *Client) GetWorkflowRuns(owner, repo string, workflowID int64) ([]models.WorkflowRun, error) {
 	response := struct {
@@ -303,6 +323,26 @@ func (c *Client) GetAllWorkflowRuns(owner, repo string) ([]models.WorkflowRun, e
 	}
 
 	return response.WorkflowRuns, nil
+}
+
+// GetAllWorkflowRunsPaginated returns workflow runs for a repository with pagination support
+func (c *Client) GetAllWorkflowRunsPaginated(owner, repo string, page, perPage int) ([]models.WorkflowRun, int, error) {
+	response := struct {
+		WorkflowRuns []models.WorkflowRun `json:"workflow_runs"`
+		TotalCount   int                 `json:"total_count"`
+	}{}
+
+	endpoint := fmt.Sprintf("repos/%s/%s/actions/runs?page=%d&per_page=%d", owner, repo, page, perPage)
+	
+	err := retryWithBackoff(c.retryConfig, func() error {
+		return c.restClient.Get(endpoint, &response)
+	})
+	
+	if err != nil {
+		return nil, 0, categorizeError(err)
+	}
+
+	return response.WorkflowRuns, response.TotalCount, nil
 }
 
 // GetWorkflowRunLogs returns logs for a workflow run

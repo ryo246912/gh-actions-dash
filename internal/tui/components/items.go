@@ -262,11 +262,6 @@ func (d *WorkflowRunItemDelegate) Render(w io.Writer, m list.Model, index int, l
 		parts := []string{name, statusStyle.Render(statusText), branch, actor, prInfo, durationStr, timeStr}
 		line = strings.Join(parts, " ")
 		line = d.styles.ListItem().Render(line)
-
-		// Add highlight for running workflows
-		if run.Status == "in_progress" || run.Status == "queued" {
-			line = lipgloss.NewStyle().Foreground(lipgloss.Color("226")).Render(line)
-		}
 	}
 
 	_, _ = fmt.Fprint(w, line)

@@ -3,7 +3,6 @@ package tui
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
@@ -69,11 +68,6 @@ type App struct {
 	loading bool
 	err     error
 
-	// Watch mode settings
-	watchMode     bool
-	watchInterval time.Duration
-	lastUpdated   time.Time
-
 	// Pagination state
 	workflowsPage    int
 	workflowsPerPage int
@@ -129,8 +123,6 @@ func NewApp(client *github.Client, owner, repo string) *App {
 		previewPanel:     previewPanel,
 		logProcessor:     logs.NewProcessor(styles.GetContent()),
 		loading:          true,
-		watchMode:        false,
-		watchInterval:    10 * time.Second,
 		workflowsPage:    1,
 		workflowsPerPage: 100,
 		allRunsPage:      1,
@@ -192,26 +184,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case allRunsLoadedMsg:
 		a.allRuns = msg.runs
 		a.loading = false
-		a.lastUpdated = time.Now()
 		a.updateAllRunsList()
 
 		// Load jobs for the first run if available
-		var cmd tea.Cmd
 		if len(a.allRuns) > 0 {
-			cmd = a.loadWorkflowRunJobs(a.allRuns[0].ID)
+			return a, a.loadWorkflowRunJobs(a.allRuns[0].ID)
 		}
-
-		// Auto-enable watch mode if there are running workflows
-		if !a.watchMode && a.hasRunningWorkflows() {
-			a.watchMode = true
-		}
-
-		// Start watch mode if enabled
-		if a.watchMode {
-			return a, tea.Batch(cmd, a.watchTick())
-		}
-
-		return a, cmd
+		return a, nil
 
 	case workflowsPaginatedLoadedMsg:
 		a.workflows = msg.workflows
@@ -226,35 +205,63 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.allRunsTotal = msg.total
 		a.allRunsPage = msg.page
 		a.loading = false
-		a.lastUpdated = time.Now()
 		a.updateAllRunsList()
 
 		// Load jobs for the first run if available
-		var cmd tea.Cmd
 		if len(a.allRuns) > 0 {
-			cmd = a.loadWorkflowRunJobs(a.allRuns[0].ID)
-		}
-
-		// Auto-enable watch mode if there are running workflows
-		if !a.watchMode && a.hasRunningWorkflows() {
-			a.watchMode = true
-		}
-
-		// Start watch mode if enabled
-		if a.watchMode {
-			return a, tea.Batch(cmd, a.watchTick())
-		}
-
-		return a, cmd
-
-	case watchTickMsg:
-		if a.watchMode {
-			return a, tea.Batch(a.autoRefresh(), a.watchTick())
+			return a, a.loadWorkflowRunJobs(a.allRuns[0].ID)
 		}
 		return a, nil
 	}
 
 	return a.updateLists(msg)
+}
+
+// handleNextPage handles next page navigation
+func (a *App) handleNextPage() (tea.Model, tea.Cmd) {
+	switch a.viewState {
+	case WorkflowListView:
+		if a.workflowsPage*a.workflowsPerPage < a.workflowsTotal {
+			a.workflowsPage++
+			a.loading = true
+			return a, a.loadWorkflowsPaginated()
+		}
+	case AllRunsView:
+		if a.allRunsPage*a.allRunsPerPage < a.allRunsTotal {
+			a.allRunsPage++
+			a.loading = true
+			return a, a.loadAllRunsPaginated()
+		}
+	}
+	return a, nil
+}
+
+// handlePrevPage handles previous page navigation
+func (a *App) handlePrevPage() (tea.Model, tea.Cmd) {
+	switch a.viewState {
+	case WorkflowListView:
+		if a.workflowsPage > 1 {
+			a.workflowsPage--
+			a.loading = true
+			return a, a.loadWorkflowsPaginated()
+		}
+	case AllRunsView:
+		if a.allRunsPage > 1 {
+			a.allRunsPage--
+			a.loading = true
+			return a, a.loadAllRunsPaginated()
+		}
+	}
+	return a, nil
+}
+
+// getPaginationInfo returns pagination information string
+func (a *App) getPaginationInfo(page, total, perPage int) string {
+	totalPages := (total + perPage - 1) / perPage
+	if totalPages == 0 {
+		totalPages = 1
+	}
+	return fmt.Sprintf("Page %d of %d (%d items)", page, totalPages, total)
 }
 
 // View renders the application
@@ -305,9 +312,6 @@ func (a *App) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case msg.String() == "a":
 		return a.switchToAllRunsView()
-
-	case msg.String() == "t":
-		return a.toggleWatchMode()
 
 	case key.Matches(msg, a.keyMap.Right):
 		// l key acts as Enter for forward navigation
@@ -647,32 +651,9 @@ func (a *App) renderWorkflowListView() string {
 // renderAllRunsView renders the all runs view (time-ordered)
 func (a *App) renderAllRunsView() string {
 	headerText := fmt.Sprintf("All Workflow Runs - %s/%s", a.owner, a.repo)
-	if a.watchMode {
-		headerText += " [WATCH MODE]"
-
-		// Show running workflows count
-		runningCount := 0
-		for _, run := range a.allRuns {
-			if run.Status == "in_progress" || run.Status == "queued" {
-				runningCount++
-			}
-		}
-		if runningCount > 0 {
-			headerText += fmt.Sprintf(" - %d running", runningCount)
-		}
-	}
-	if !a.lastUpdated.IsZero() {
-		headerText += fmt.Sprintf(" (Last updated: %s)", a.lastUpdated.Format("15:04:05"))
-	}
 	header := a.styles.GetTitle().Render(headerText)
 
-	watchStatus := ""
-	if a.watchMode {
-		watchStatus = " • t: Stop watch"
-	} else {
-		watchStatus = " • t: Start watch"
-	}
-	help := a.styles.GetHelp().Render("Enter: View logs • w: Workflows • r: Refresh" + watchStatus + " • n: Next page • p: Prev page • q: Quit")
+	help := a.styles.GetHelp().Render("Enter: View logs • w: Workflows • r: Refresh • n: Next page • p: Prev page • q: Quit")
 
 	// Pagination info
 	paginationInfo := ""
@@ -880,10 +861,6 @@ type allRunsLoadedMsg struct {
 	runs []models.WorkflowRun
 }
 
-type watchTickMsg struct {
-	timestamp time.Time
-}
-
 type workflowsPaginatedLoadedMsg struct {
 	workflows []models.Workflow
 	total     int
@@ -945,121 +922,6 @@ func (a *App) loadWorkflowRunJobs(runID int64) tea.Cmd {
 		}
 		return jobsLoadedMsg{jobs: jobs}
 	})
-}
-
-// toggleWatchMode toggles watch mode on/off
-func (a *App) toggleWatchMode() (tea.Model, tea.Cmd) {
-	a.watchMode = !a.watchMode
-
-	if a.watchMode {
-		return a, a.watchTick()
-	}
-
-	return a, nil
-}
-
-// watchTick creates a command that sends a tick message after the watch interval
-func (a *App) watchTick() tea.Cmd {
-	interval := a.watchInterval
-
-	// Use shorter interval if there are running workflows
-	if a.hasRunningWorkflows() {
-		interval = 5 * time.Second
-	}
-
-	return tea.Tick(interval, func(t time.Time) tea.Msg {
-		return watchTickMsg{timestamp: t}
-	})
-}
-
-// autoRefresh automatically refreshes the current view
-func (a *App) autoRefresh() tea.Cmd {
-	switch a.viewState {
-	case AllRunsView:
-		return a.loadAllRunsPaginated()
-	case WorkflowListView:
-		return a.loadWorkflowsPaginated()
-	case WorkflowRunsView:
-		if a.currentWorkflow != nil {
-			return a.loadWorkflowRuns(a.currentWorkflow.ID)
-		}
-	case WorkflowRunLogsView:
-		if a.currentRun != nil {
-			return a.loadWorkflowRunLogs(a.currentRun.ID)
-		}
-	}
-
-	return nil
-}
-
-// handleNextPage handles next page navigation
-func (a *App) handleNextPage() (tea.Model, tea.Cmd) {
-	switch a.viewState {
-	case AllRunsView:
-		if a.canGoToNextPage(a.allRunsPage, a.allRunsTotal, a.allRunsPerPage) {
-			a.allRunsPage++
-			a.loading = true
-			return a, a.loadAllRunsPaginated()
-		}
-	case WorkflowListView:
-		if a.canGoToNextPage(a.workflowsPage, a.workflowsTotal, a.workflowsPerPage) {
-			a.workflowsPage++
-			a.loading = true
-			return a, a.loadWorkflowsPaginated()
-		}
-	}
-	return a, nil
-}
-
-// handlePrevPage handles previous page navigation
-func (a *App) handlePrevPage() (tea.Model, tea.Cmd) {
-	switch a.viewState {
-	case AllRunsView:
-		if a.allRunsPage > 1 {
-			a.allRunsPage--
-			a.loading = true
-			return a, a.loadAllRunsPaginated()
-		}
-	case WorkflowListView:
-		if a.workflowsPage > 1 {
-			a.workflowsPage--
-			a.loading = true
-			return a, a.loadWorkflowsPaginated()
-		}
-	}
-	return a, nil
-}
-
-// canGoToNextPage checks if there is a next page
-func (a *App) canGoToNextPage(currentPage, total, perPage int) bool {
-	maxPages := (total + perPage - 1) / perPage
-	return currentPage < maxPages
-}
-
-// getPaginationInfo returns pagination information string
-func (a *App) getPaginationInfo(currentPage, total, perPage int) string {
-	if total == 0 {
-		return ""
-	}
-
-	maxPages := (total + perPage - 1) / perPage
-	start := (currentPage-1)*perPage + 1
-	end := currentPage * perPage
-	if end > total {
-		end = total
-	}
-
-	return fmt.Sprintf("Page %d/%d (%d-%d of %d)", currentPage, maxPages, start, end, total)
-}
-
-// hasRunningWorkflows checks if there are any running workflows
-func (a *App) hasRunningWorkflows() bool {
-	for _, run := range a.allRuns {
-		if run.Status == "in_progress" || run.Status == "queued" {
-			return true
-		}
-	}
-	return false
 }
 
 // handleLogNavigation handles navigation in the logs view

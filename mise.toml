@@ -1,0 +1,166 @@
+# go
+[tasks.go-build]
+run = "go run ."
+
+[tasks.extension-remote-install]
+description = "install gh-actions-dash extension"
+run         = "gh extension install ryo246912/gh-actions-dash"
+
+[tasks.extension-local-install]
+description = "install gh-actions-dash extension(local)"
+run = [
+    "go build .",
+    "gh extension install .",
+]
+
+[tasks.extension-build-install]
+description = "Rebuild and install gh-actions-dash extension"
+run = [
+    "gh extension remove gh-actions-dash || true",
+    "mise run extension-local-install",
+]
+
+# lint
+[tasks.lint-action]
+depends = [
+    "lint-actionlint",
+    "lint-ghalint",
+    "lint-zizmor",
+]
+description = "Run all action linters"
+
+[tasks.lint-go]
+depends = [
+    "lint-golangci",
+    "lint-gomod",
+]
+description = "Run go linter"
+
+[tasks.lint-actionlint]
+description = "Run actionlint"
+hide        = true
+run         = "actionlint -ignore 'SC2016:'"
+
+[tasks.lint-zizmor]
+description = "Run zizmor"
+hide        = true
+run         = "zizmor --pedantic --gh-token=$(gh auth token) --min-severity=low .github/workflows"
+
+[tasks.lint-ghalint]
+description = "Run ghalint"
+hide        = true
+run         = "ghalint run"
+
+[tasks.lint-golangci]
+description = "Run golangci-lint"
+run         = "golangci-lint run"
+
+[tasks.lint-gomod]
+alias       = "fix-gomod"
+description = "go mod tidy"
+run         = "go mod tidy"
+
+[tasks.lint-other]
+depends = [
+    "lint-toml",
+    "lint-yaml",
+]
+description = "Run other linters"
+
+[tasks.lint-all]
+depends = [
+    "lint-action",
+    "lint-other",
+    "lint-go",
+]
+description = "Run all linters"
+
+# fix
+[tasks.fix-action]
+description = "Run fix actions files"
+run         = ["pinact run", "disable-checkout-persist-credentials"]
+
+[tasks.fix-other]
+depends = [
+    "fix-toml",
+    "fix-yaml",
+]
+description = "Run other formatter"
+
+[tasks.fix-golangci]
+description = "Run fix golangci"
+hide        = true
+run         = "golangci-lint run --fix"
+[tasks.fix-go]
+depends = [
+    "fix-golangci",
+    "fix-gomod",
+]
+description = "Run go formatter"
+
+# test
+[tasks.test]
+description = "Run all tests"
+run         = "go test -v ./..."
+
+[tasks.test-coverage]
+description = "Run tests with coverage report"
+run = [
+    "go test -v -coverprofile=tmp/coverage.out -covermode=atomic ./...",
+    "go tool cover -func=tmp/coverage.out",
+    "go tool cover -html=tmp/coverage.out -o tmp/coverage.html",
+]
+
+[tasks.test-race]
+description = "Run tests with race detector"
+run         = "go test -v -race ./..."
+
+[tasks.test-bench]
+description = "Run benchmark tests"
+run         = "go test -v -bench=. -benchmem ./..."
+
+[tasks.test-verbose]
+description = "Run tests with verbose output and detailed results"
+run         = "go test -v -count=1 -failfast ./..."
+
+[tasks.test-short]
+description = "Run only fast tests (skip slow integration tests)"
+run         = "go test -v -short ./..."
+
+[tasks.dev]
+depends = [
+    "test-coverage",
+    "lint-go",
+    "go-build",
+]
+description = "Development workflow: test + lint + build"
+
+# yaml
+[tasks.lint-yaml]
+description = "Run lint YAML files"
+hide        = true
+run         = "prettier --check '**/*.{yaml,yml}'"
+
+[tasks.fix-yaml]
+description = "Run fix YAML files"
+hide        = true
+run         = "prettier --write '**/*.{yaml,yml}'"
+
+# toml
+[tasks.lint-toml]
+description = "Run lint TOML files"
+hide        = true
+run         = "taplo format --check"
+
+[tasks.fix-toml]
+description = "Run fix TOML files"
+hide        = true
+run         = "taplo format"
+
+[tools]
+actionlint                     = "1.7.7"
+"aqua:suzuki-shunsuke/ghalint" = "1.5.1"
+golangci-lint                  = "2.1.6"
+"npm:@taplo/cli"               = "0.7.0"
+"npm:prettier"                 = "3.6.0"
+"pipx:zizmor"                  = "1.9.0"

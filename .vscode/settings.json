@@ -1,0 +1,9 @@
+{
+  "evenBetterToml.taplo.configFile.path": "taplo.toml",
+  "[toml]": {
+    "editor.defaultFormatter": "tamasfe.even-better-toml",
+    "editor.formatOnSave": true
+  },
+  "go.lintTool": "golangci-lint-v2",
+  "go.lintOnSave": "package"
+}

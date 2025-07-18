@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
@@ -68,6 +69,10 @@ type App struct {
 	loading bool
 	err     error
 	
+	// Watch mode settings
+	watchMode     bool
+	watchInterval time.Duration
+	lastUpdated   time.Time
 }
 
 // NewApp creates a new TUI application
@@ -116,6 +121,8 @@ func NewApp(client *github.Client, owner, repo string) *App {
 		previewPanel: previewPanel,
 		logProcessor: logs.NewProcessor(styles.GetContent()),
 		loading:      true,
+		watchMode:    false,
+		watchInterval: 10 * time.Second,
 	}
 }
 
@@ -173,11 +180,30 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case allRunsLoadedMsg:
 		a.allRuns = msg.runs
 		a.loading = false
+		a.lastUpdated = time.Now()
 		a.updateAllRunsList()
 		
 		// Load jobs for the first run if available
+		var cmd tea.Cmd
 		if len(a.allRuns) > 0 {
-			return a, a.loadWorkflowRunJobs(a.allRuns[0].ID)
+			cmd = a.loadWorkflowRunJobs(a.allRuns[0].ID)
+		}
+		
+		// Auto-enable watch mode if there are running workflows
+		if !a.watchMode && a.hasRunningWorkflows() {
+			a.watchMode = true
+		}
+		
+		// Start watch mode if enabled
+		if a.watchMode {
+			return a, tea.Batch(cmd, a.watchTick())
+		}
+		
+		return a, cmd
+		
+	case watchTickMsg:
+		if a.watchMode {
+			return a, tea.Batch(a.autoRefresh(), a.watchTick())
 		}
 		return a, nil
 	}
@@ -233,6 +259,9 @@ func (a *App) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		
 	case msg.String() == "a":
 		return a.switchToAllRunsView()
+		
+	case msg.String() == "t":
+		return a.toggleWatchMode()
 		
 	case key.Matches(msg, a.keyMap.Right):
 		// l key acts as Enter for forward navigation
@@ -554,9 +583,33 @@ func (a *App) renderWorkflowListView() string {
 
 // renderAllRunsView renders the all runs view (time-ordered)
 func (a *App) renderAllRunsView() string {
-	header := a.styles.GetTitle().Render(fmt.Sprintf("All Workflow Runs - %s/%s", a.owner, a.repo))
+	headerText := fmt.Sprintf("All Workflow Runs - %s/%s", a.owner, a.repo)
+	if a.watchMode {
+		headerText += " [WATCH MODE]"
+		
+		// Show running workflows count
+		runningCount := 0
+		for _, run := range a.allRuns {
+			if run.Status == "in_progress" || run.Status == "queued" {
+				runningCount++
+			}
+		}
+		if runningCount > 0 {
+			headerText += fmt.Sprintf(" - %d running", runningCount)
+		}
+	}
+	if !a.lastUpdated.IsZero() {
+		headerText += fmt.Sprintf(" (Last updated: %s)", a.lastUpdated.Format("15:04:05"))
+	}
+	header := a.styles.GetTitle().Render(headerText)
 	
-	help := a.styles.GetHelp().Render("Enter: View logs • w: Workflows • r: Refresh • q: Quit")
+	watchStatus := ""
+	if a.watchMode {
+		watchStatus = " • t: Stop watch"
+	} else {
+		watchStatus = " • t: Start watch"
+	}
+	help := a.styles.GetHelp().Render("Enter: View logs • w: Workflows • r: Refresh" + watchStatus + " • q: Quit")
 	
 	// Left side - all runs list
 	var leftMainContent string
@@ -755,6 +808,10 @@ type allRunsLoadedMsg struct {
 	runs []models.WorkflowRun
 }
 
+type watchTickMsg struct {
+	timestamp time.Time
+}
+
 // Commands
 func (a *App) loadWorkflows() tea.Cmd {
 	return tea.Cmd(func() tea.Msg {
@@ -804,6 +861,61 @@ func (a *App) loadWorkflowRunJobs(runID int64) tea.Cmd {
 		}
 		return jobsLoadedMsg{jobs: jobs}
 	})
+}
+
+// toggleWatchMode toggles watch mode on/off
+func (a *App) toggleWatchMode() (tea.Model, tea.Cmd) {
+	a.watchMode = !a.watchMode
+	
+	if a.watchMode {
+		return a, a.watchTick()
+	}
+	
+	return a, nil
+}
+
+// watchTick creates a command that sends a tick message after the watch interval
+func (a *App) watchTick() tea.Cmd {
+	interval := a.watchInterval
+	
+	// Use shorter interval if there are running workflows
+	if a.hasRunningWorkflows() {
+		interval = 5 * time.Second
+	}
+	
+	return tea.Tick(interval, func(t time.Time) tea.Msg {
+		return watchTickMsg{timestamp: t}
+	})
+}
+
+// autoRefresh automatically refreshes the current view
+func (a *App) autoRefresh() tea.Cmd {
+	switch a.viewState {
+	case AllRunsView:
+		return a.loadAllRuns()
+	case WorkflowListView:
+		return a.loadWorkflows()
+	case WorkflowRunsView:
+		if a.currentWorkflow != nil {
+			return a.loadWorkflowRuns(a.currentWorkflow.ID)
+		}
+	case WorkflowRunLogsView:
+		if a.currentRun != nil {
+			return a.loadWorkflowRunLogs(a.currentRun.ID)
+		}
+	}
+	
+	return nil
+}
+
+// hasRunningWorkflows checks if there are any running workflows
+func (a *App) hasRunningWorkflows() bool {
+	for _, run := range a.allRuns {
+		if run.Status == "in_progress" || run.Status == "queued" {
+			return true
+		}
+	}
+	return false
 }
 
 

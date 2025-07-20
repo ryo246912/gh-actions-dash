@@ -3,6 +3,8 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
@@ -24,6 +26,68 @@ const (
 	WorkflowRunsView
 	WorkflowRunLogsView
 )
+
+// JobsCacheEntry represents a cached job entry with timestamp
+type JobsCacheEntry struct {
+	Jobs      []models.Job
+	Timestamp time.Time
+}
+
+// JobsCache represents the jobs cache with TTL
+type JobsCache struct {
+	mu      sync.RWMutex
+	entries map[int64]JobsCacheEntry
+	ttl     time.Duration
+}
+
+// NewJobsCache creates a new jobs cache
+func NewJobsCache(ttl time.Duration) *JobsCache {
+	return &JobsCache{
+		entries: make(map[int64]JobsCacheEntry),
+		ttl:     ttl,
+	}
+}
+
+// Get retrieves jobs from cache if not expired
+func (c *JobsCache) Get(runID int64) ([]models.Job, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	entry, exists := c.entries[runID]
+	if !exists {
+		return nil, false
+	}
+
+	if time.Since(entry.Timestamp) > c.ttl {
+		return nil, false
+	}
+
+	return entry.Jobs, true
+}
+
+// Set stores jobs in cache with current timestamp
+func (c *JobsCache) Set(runID int64, jobs []models.Job) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.entries[runID] = JobsCacheEntry{
+		Jobs:      jobs,
+		Timestamp: time.Now(),
+	}
+}
+
+// Cleanup removes expired entries
+func (c *JobsCache) Cleanup() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	now := time.Now()
+	for runID, entry := range c.entries {
+		if now.Sub(entry.Timestamp) > c.ttl {
+			delete(c.entries, runID)
+		}
+	}
+}
 
 // App represents the main application state
 type App struct {
@@ -75,6 +139,12 @@ type App struct {
 	allRunsPage      int
 	allRunsPerPage   int
 	allRunsTotal     int
+
+	// Cache and debounce
+	jobsCache     *JobsCache
+	debounceTimer *time.Timer
+	pendingRunID  int64
+	debounceMutex sync.Mutex
 }
 
 // NewApp creates a new TUI application
@@ -127,11 +197,21 @@ func NewApp(client *github.Client, owner, repo string) *App {
 		workflowsPerPage: 100,
 		allRunsPage:      1,
 		allRunsPerPage:   100,
+		jobsCache:        NewJobsCache(10 * time.Minute),
 	}
 }
 
 // Init initializes the application
 func (a *App) Init() tea.Cmd {
+	// Start periodic cache cleanup
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			a.jobsCache.Cleanup()
+		}
+	}()
+
 	return tea.Batch(
 		a.loadAllRunsPaginated(),
 		tea.EnterAltScreen,
@@ -457,11 +537,11 @@ func (a *App) updateLists(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.allRunsList, cmd = a.allRunsList.Update(msg)
 		cmds = append(cmds, cmd)
 
-		// If selection changed, load jobs for the new selection
+		// If selection changed, load jobs for the new selection with debounce
 		if a.allRunsList.Index() != oldIndex && len(a.allRuns) > 0 {
 			if a.allRunsList.Index() < len(a.allRuns) {
 				selectedRun := a.allRuns[a.allRunsList.Index()]
-				cmds = append(cmds, a.loadWorkflowRunJobs(selectedRun.ID))
+				a.scheduleJobsLoad(selectedRun.ID)
 			}
 		}
 	case WorkflowListView:
@@ -472,11 +552,11 @@ func (a *App) updateLists(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.runsList, cmd = a.runsList.Update(msg)
 		cmds = append(cmds, cmd)
 
-		// If selection changed, load jobs for the new selection
+		// If selection changed, load jobs for the new selection with debounce
 		if a.runsList.Index() != oldIndex && len(a.workflowRuns) > 0 {
 			if a.runsList.Index() < len(a.workflowRuns) {
 				selectedRun := a.workflowRuns[a.runsList.Index()]
-				cmds = append(cmds, a.loadWorkflowRunJobs(selectedRun.ID))
+				a.scheduleJobsLoad(selectedRun.ID)
 			}
 		}
 	}
@@ -914,12 +994,74 @@ func (a *App) loadWorkflowRunLogs(runID int64) tea.Cmd {
 	})
 }
 
+// scheduleJobsLoad schedules a debounced jobs load
+func (a *App) scheduleJobsLoad(runID int64) {
+	a.debounceMutex.Lock()
+	defer a.debounceMutex.Unlock()
+
+	// キャッシュから取得を試行
+	if jobs, found := a.jobsCache.Get(runID); found {
+		a.currentJobs = jobs
+		return
+	}
+
+	// Cancel existing timer
+	if a.debounceTimer != nil {
+		a.debounceTimer.Stop()
+	}
+
+	a.pendingRunID = runID
+
+	// Set new timer
+	a.debounceTimer = time.AfterFunc(400*time.Millisecond, func() {
+		// Execute the API call after debounce period
+		a.executeJobsLoad(runID)
+	})
+}
+
+// executeJobsLoad executes the actual jobs load
+func (a *App) executeJobsLoad(runID int64) {
+	a.debounceMutex.Lock()
+	defer a.debounceMutex.Unlock()
+
+	// Check if this is still the pending request
+	if a.pendingRunID != runID {
+		return
+	}
+
+	// キャッシュから再度確認（並行処理対策）
+	if jobs, found := a.jobsCache.Get(runID); found {
+		a.currentJobs = jobs
+		return
+	}
+
+	// API呼び出し実行
+	go func() {
+		jobs, err := a.client.GetWorkflowRunJobs(a.owner, a.repo, runID)
+		if err == nil {
+			// キャッシュに保存
+			a.jobsCache.Set(runID, jobs)
+			a.currentJobs = jobs
+		}
+	}()
+}
+
 func (a *App) loadWorkflowRunJobs(runID int64) tea.Cmd {
 	return tea.Cmd(func() tea.Msg {
+		// キャッシュから取得を試行
+		if jobs, found := a.jobsCache.Get(runID); found {
+			return jobsLoadedMsg{jobs: jobs}
+		}
+
+		// キャッシュにない場合のみAPI呼び出し
 		jobs, err := a.client.GetWorkflowRunJobs(a.owner, a.repo, runID)
 		if err != nil {
 			return errorMsg{err: err}
 		}
+
+		// キャッシュに保存
+		a.jobsCache.Set(runID, jobs)
+
 		return jobsLoadedMsg{jobs: jobs}
 	})
 }

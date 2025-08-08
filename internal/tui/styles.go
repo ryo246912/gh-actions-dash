@@ -150,7 +150,7 @@ func DefaultStyles() Styles {
 
 		Help: lipgloss.NewStyle().
 			Foreground(mutedColor).
-			Padding(1, 2),
+			Padding(0, 2),
 
 		HelpKey: lipgloss.NewStyle().
 			Foreground(primaryColor).

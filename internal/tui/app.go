@@ -426,6 +426,11 @@ func (a *App) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.jumpInputBuffer = ""
 			return a, nil
 		}
+		switch {
+		case key.Matches(msg, a.keyMap.Left):
+			return a.goBack()
+		}
+
 		// 通常のログナビゲーション
 		return a.handleLogNavigation(msg)
 	}
@@ -448,12 +453,7 @@ func (a *App) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a.switchToAllRunsView()
 
 	case key.Matches(msg, a.keyMap.Right):
-		// l key acts as Enter for forward navigation
 		return a.handleEnter()
-
-	case key.Matches(msg, a.keyMap.Left):
-		// h key acts as Esc for backward navigation
-		return a.goBack()
 
 	case key.Matches(msg, a.keyMap.NextPage):
 		return a.handleNextPage()
@@ -977,10 +977,10 @@ func (a *App) renderWorkflowRunLogsView() string {
 	// ジャンプ入力モード時のプロンプト
 	var jumpPrompt string
 	if a.jumpInputMode {
-		jumpPrompt = a.styles.GetHelp().Render(":" + a.jumpInputBuffer + "_  (Enterでジャンプ/Escでキャンセル)")
+		jumpPrompt = a.styles.GetHelp().Render(":" + a.jumpInputBuffer + "_  (Enter to jump / Esc to cancel)")
 	}
 
-	help := a.styles.GetHelp().Render("↑/↓: Scroll • PageUp/PageDown: Page • Home/End: Top/Bottom • Esc: Back • q: Quit • :nでn行目ジャンプ")
+	help := a.styles.GetHelp().Render("↑/↓: Scroll • PageUp/PageDown: Page UpDown • g/G: Top/Bottom • Esc: Back • q: Quit • :n to jump to line n")
 
 	return lipgloss.JoinVertical(
 		lipgloss.Left,

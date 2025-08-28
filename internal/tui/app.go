@@ -93,12 +93,14 @@ func (c *JobsCache) Cleanup() {
 // App represents the main application state
 type App struct {
 	// 検索機能
-	searchInputMode   bool
-	searchInputBuffer string
-	searchActiveQuery string // 検索確定後もハイライト用
-	client            *github.Client
-	owner             string
-	repo              string
+	searchInputMode    bool
+	searchInputBuffer  string
+	searchActiveQuery  string // 検索確定後もハイライト用
+	searchMatchIndices []int  // 検索ヒット行番号リスト
+	searchMatchIndex   int    // 現在のヒットインデックス
+	client             *github.Client
+	owner              string
+	repo               string
 
 	// UI state
 	viewState ViewState
@@ -401,23 +403,29 @@ func (a *App) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					a.searchInputBuffer = a.searchInputBuffer[:len(a.searchInputBuffer)-1]
 				}
 			case tea.KeyEnter:
-				// 検索して最初の一致行にジャンプ
+				// 検索して一致行リストを作成し、最初の一致行にジャンプ
 				lines := strings.Split(a.logs, "\n")
 				query := a.searchInputBuffer
+				a.searchMatchIndices = nil
 				for i, line := range lines {
 					if strings.Contains(strings.ToLower(line), strings.ToLower(query)) {
-						// 画面の先頭に来るように
-						maxOffset := len(lines) - (a.height - 6)
-						if maxOffset < 0 {
-							maxOffset = 0
-						}
-						offset := i
-						if offset > maxOffset {
-							offset = maxOffset
-						}
-						a.logOffset = offset
-						break
+						a.searchMatchIndices = append(a.searchMatchIndices, i)
 					}
+				}
+				if len(a.searchMatchIndices) > 0 {
+					a.searchMatchIndex = 0
+					// 画面の先頭に来るように
+					maxOffset := len(lines) - (a.height - 6)
+					if maxOffset < 0 {
+						maxOffset = 0
+					}
+					offset := a.searchMatchIndices[0]
+					if offset > maxOffset {
+						offset = maxOffset
+					}
+					a.logOffset = offset
+				} else {
+					a.searchMatchIndex = -1
 				}
 				a.searchInputMode = false
 				a.searchActiveQuery = a.searchInputBuffer // ハイライト維持
@@ -425,6 +433,8 @@ func (a *App) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				a.searchInputMode = false
 				a.searchInputBuffer = ""
 				a.searchActiveQuery = "" // エスケープ時は必ずハイライトも消す
+				a.searchMatchIndices = nil
+				a.searchMatchIndex = -1
 			}
 			return a, nil
 		}
@@ -477,7 +487,39 @@ func (a *App) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, a.keyMap.Left):
 			return a.goBack()
 		case msg.Type == tea.KeyEsc:
-			a.searchActiveQuery = "" // エスケープ時はハイライトも消す
+			a.searchActiveQuery = "" // エスケープ時はハイライト消す
+			a.searchMatchIndices = nil
+			a.searchMatchIndex = -1
+		// n: 次の検索ヒットへジャンプ
+		case msg.String() == "n":
+			if a.searchActiveQuery != "" && len(a.searchMatchIndices) > 0 {
+				a.searchMatchIndex = (a.searchMatchIndex + 1) % len(a.searchMatchIndices)
+				lines := strings.Split(a.logs, "\n")
+				maxOffset := len(lines) - (a.height - 6)
+				if maxOffset < 0 {
+					maxOffset = 0
+				}
+				offset := a.searchMatchIndices[a.searchMatchIndex]
+				if offset > maxOffset {
+					offset = maxOffset
+				}
+				a.logOffset = offset
+			}
+		// Shift+n (N): 前の検索ヒットへジャンプ
+		case msg.String() == "N":
+			if a.searchActiveQuery != "" && len(a.searchMatchIndices) > 0 {
+				a.searchMatchIndex = (a.searchMatchIndex - 1 + len(a.searchMatchIndices)) % len(a.searchMatchIndices)
+				lines := strings.Split(a.logs, "\n")
+				maxOffset := len(lines) - (a.height - 6)
+				if maxOffset < 0 {
+					maxOffset = 0
+				}
+				offset := a.searchMatchIndices[a.searchMatchIndex]
+				if offset > maxOffset {
+					offset = maxOffset
+				}
+				a.logOffset = offset
+			}
 		}
 		// 通常のログナビゲーション
 		return a.handleLogNavigation(msg)

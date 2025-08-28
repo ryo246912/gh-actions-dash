@@ -1085,15 +1085,17 @@ func (a *App) renderWorkflowRunLogsView() string {
 	}
 	content := strings.Join(highlightedLines, "\n")
 
-	// Prompt for search/jump input mode (English)
+	// Prompt for search/jump input mode
 	var inputPrompt string
 	if a.searchInputMode {
-		inputPrompt = a.styles.GetHelp().Render("/" + a.searchInputBuffer + "_  (Enter to search / Esc to cancel)")
+		inputPrompt = a.styles.GetHelp().Render("/" + a.searchInputBuffer + "_  (Enter: search, n/N: next/prev match, Esc: reset)")
 	} else if a.jumpInputMode {
 		inputPrompt = a.styles.GetHelp().Render(":" + a.jumpInputBuffer + "_  (Enter to jump / Esc to cancel)")
+	} else if a.searchActiveQuery != "" {
+		inputPrompt = a.styles.GetHelp().Render("n/N: next/prev match, Esc: reset")
 	}
 
-	help := a.styles.GetHelp().Render("↑/↓: Scroll • PageUp/PageDown: Page UpDown • g/G: Top/Bottom • Esc: Back • q: Quit • / to search :n to jump")
+	help := a.styles.GetHelp().Render("↑/↓: Scroll • PageUp/PageDown: Page UpDown • g/G: Top/Bottom • q: Quit • / to search :n to jump")
 
 	return lipgloss.JoinVertical(
 		lipgloss.Left,

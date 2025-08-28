@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -91,9 +92,15 @@ func (c *JobsCache) Cleanup() {
 
 // App represents the main application state
 type App struct {
-	client *github.Client
-	owner  string
-	repo   string
+	// 検索機能
+	searchInputMode    bool
+	searchInputBuffer  string
+	searchActiveQuery  string // 検索確定後もハイライト用
+	searchMatchIndices []int  // 検索ヒット行番号リスト
+	searchMatchIndex   int    // 現在のヒットインデックス
+	client             *github.Client
+	owner              string
+	repo               string
 
 	// UI state
 	viewState ViewState
@@ -145,6 +152,10 @@ type App struct {
 	debounceTimer *time.Timer
 	pendingRunID  int64
 	debounceMutex sync.Mutex
+
+	// Log jump input mode(行ジャンプ入力モード)
+	jumpInputMode   bool
+	jumpInputBuffer string
 }
 
 // NewApp creates a new TUI application
@@ -374,10 +385,148 @@ func (a *App) View() string {
 
 // handleKeyMsg handles keyboard input
 func (a *App) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// --- グローバルキー ---
 	switch {
 	case key.Matches(msg, a.keyMap.Quit):
 		return a, tea.Quit
+	}
 
+	// --- WorkflowRunLogsView ---
+	if a.viewState == WorkflowRunLogsView {
+		// 検索入力モード
+		if a.searchInputMode {
+			switch msg.Type {
+			case tea.KeyRunes:
+				a.searchInputBuffer += msg.String()
+			case tea.KeyBackspace:
+				if len(a.searchInputBuffer) > 0 {
+					a.searchInputBuffer = a.searchInputBuffer[:len(a.searchInputBuffer)-1]
+				}
+			case tea.KeyEnter:
+				// 検索して一致行リストを作成し、最初の一致行にジャンプ
+				lines := strings.Split(a.logs, "\n")
+				query := a.searchInputBuffer
+				a.searchMatchIndices = nil
+				for i, line := range lines {
+					if strings.Contains(strings.ToLower(line), strings.ToLower(query)) {
+						a.searchMatchIndices = append(a.searchMatchIndices, i)
+					}
+				}
+				if len(a.searchMatchIndices) > 0 {
+					a.searchMatchIndex = 0
+					// 画面の先頭に来るように
+					maxOffset := len(lines) - (a.height - 6)
+					if maxOffset < 0 {
+						maxOffset = 0
+					}
+					offset := a.searchMatchIndices[0]
+					if offset > maxOffset {
+						offset = maxOffset
+					}
+					a.logOffset = offset
+				} else {
+					a.searchMatchIndex = -1
+				}
+				a.searchInputMode = false
+				a.searchActiveQuery = a.searchInputBuffer // ハイライト維持
+			case tea.KeyEsc:
+				a.searchInputMode = false
+				a.searchInputBuffer = ""
+				a.searchActiveQuery = "" // エスケープ時は必ずハイライトも消す
+				a.searchMatchIndices = nil
+				a.searchMatchIndex = -1
+			}
+			return a, nil
+		}
+		// ジャンプ入力モード
+		if a.jumpInputMode {
+			switch msg.Type {
+			case tea.KeyRunes:
+				r := msg.String()
+				if r >= "0" && r <= "9" {
+					a.jumpInputBuffer += r
+				}
+			case tea.KeyBackspace:
+				if len(a.jumpInputBuffer) > 0 {
+					a.jumpInputBuffer = a.jumpInputBuffer[:len(a.jumpInputBuffer)-1]
+				}
+			case tea.KeyEnter:
+				if n, err := strconv.Atoi(a.jumpInputBuffer); err == nil && n > 0 {
+					lines := strings.Split(a.logs, "\n")
+					maxOffset := len(lines) - (a.height - 6)
+					if maxOffset < 0 {
+						maxOffset = 0
+					}
+					offset := n - 1
+					if offset > maxOffset {
+						offset = maxOffset
+					}
+					a.logOffset = offset
+				}
+				a.jumpInputMode = false
+				a.jumpInputBuffer = ""
+			case tea.KeyEsc:
+				a.jumpInputMode = false
+				a.jumpInputBuffer = ""
+			}
+			return a, nil
+		}
+		// /で検索入力モード開始
+		if msg.String() == "/" {
+			a.searchInputMode = true
+			a.searchInputBuffer = ""
+			return a, nil
+		}
+		// :でジャンプ入力モード開始
+		if msg.String() == ":" {
+			a.jumpInputMode = true
+			a.jumpInputBuffer = ""
+			return a, nil
+		}
+		switch {
+		case key.Matches(msg, a.keyMap.Left):
+			return a.goBack()
+		case msg.Type == tea.KeyEsc:
+			a.searchActiveQuery = "" // エスケープ時はハイライト消す
+			a.searchMatchIndices = nil
+			a.searchMatchIndex = -1
+		// n: 次の検索ヒットへジャンプ
+		case msg.String() == "n":
+			if a.searchActiveQuery != "" && len(a.searchMatchIndices) > 0 {
+				a.searchMatchIndex = (a.searchMatchIndex + 1) % len(a.searchMatchIndices)
+				lines := strings.Split(a.logs, "\n")
+				maxOffset := len(lines) - (a.height - 6)
+				if maxOffset < 0 {
+					maxOffset = 0
+				}
+				offset := a.searchMatchIndices[a.searchMatchIndex]
+				if offset > maxOffset {
+					offset = maxOffset
+				}
+				a.logOffset = offset
+			}
+		// Shift+n (N): 前の検索ヒットへジャンプ
+		case msg.String() == "N":
+			if a.searchActiveQuery != "" && len(a.searchMatchIndices) > 0 {
+				a.searchMatchIndex = (a.searchMatchIndex - 1 + len(a.searchMatchIndices)) % len(a.searchMatchIndices)
+				lines := strings.Split(a.logs, "\n")
+				maxOffset := len(lines) - (a.height - 6)
+				if maxOffset < 0 {
+					maxOffset = 0
+				}
+				offset := a.searchMatchIndices[a.searchMatchIndex]
+				if offset > maxOffset {
+					offset = maxOffset
+				}
+				a.logOffset = offset
+			}
+		}
+		// 通常のログナビゲーション
+		return a.handleLogNavigation(msg)
+	}
+
+	// --- それ以外のビュー ---
+	switch {
 	case key.Matches(msg, a.keyMap.Back):
 		return a.goBack()
 
@@ -394,24 +543,13 @@ func (a *App) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a.switchToAllRunsView()
 
 	case key.Matches(msg, a.keyMap.Right):
-		// l key acts as Enter for forward navigation
 		return a.handleEnter()
-
-	case key.Matches(msg, a.keyMap.Left):
-		// h key acts as Esc for backward navigation
-		return a.goBack()
 
 	case key.Matches(msg, a.keyMap.NextPage):
 		return a.handleNextPage()
 
 	case key.Matches(msg, a.keyMap.PrevPage):
 		return a.handlePrevPage()
-
-	}
-
-	// Handle log scrolling for logs view
-	if a.viewState == WorkflowRunLogsView {
-		return a.handleLogNavigation(msg)
 	}
 
 	// Pass navigation keys to the active list
@@ -899,19 +1037,71 @@ func (a *App) renderWorkflowRunLogsView() string {
 
 	visibleLines := lines[start:end]
 
-	// Apply simple highlighting to lines
 	highlightedLines := make([]string, len(visibleLines))
+	lineNumberWidth := len(fmt.Sprintf("%d", len(lines))) // 桁数揃え
+	stepGroupPrefix := "##[group]Run "
+
+	// 区切り線の長さを計算
+	// header(タイトル)やhelp分を除いた幅、行番号+区切り記号分も除く
+	// 例: " 123 | " なら lineNumberWidth+3
+	sepLen := a.width - (lineNumberWidth + 3) - 2 // 2は左右の余白分の目安
+	if sepLen < 10 {
+		sepLen = 10
+	}
+	sepStr := strings.Repeat("─", sepLen)
+
+	// 検索ワードハイライト用
+	var searchQuery string
+	if a.searchInputMode && a.searchInputBuffer != "" {
+		searchQuery = a.searchInputBuffer
+	} else if a.searchActiveQuery != "" {
+		searchQuery = a.searchActiveQuery
+	}
+
 	for i, line := range visibleLines {
-		highlightedLines[i] = a.applySimpleHighlight(line)
+		lineNum := start + i + 1
+		// 行番号をつける
+		prefix := fmt.Sprintf("%*d | ", lineNumberWidth, lineNum)
+
+		trimmed := strings.TrimSpace(line)
+		if strings.Contains(trimmed, stepGroupPrefix) {
+			sep := lipgloss.NewStyle().Foreground(lipgloss.Color("36")).Bold(true).Render(sepStr)
+			highlightedLines = append(highlightedLines, sep)
+		}
+
+		// 検索ワードがあれば黄色でハイライト
+		renderedLine := a.applySimpleHighlight(line)
+		if searchQuery != "" {
+			idx := strings.Index(strings.ToLower(renderedLine), strings.ToLower(searchQuery))
+			if idx >= 0 {
+				before := renderedLine[:idx]
+				match := renderedLine[idx : idx+len(searchQuery)]
+				after := renderedLine[idx+len(searchQuery):]
+				match = lipgloss.NewStyle().Foreground(lipgloss.Color("226")).Bold(true).Render(match)
+				renderedLine = before + match + after
+			}
+		}
+		highlightedLines = append(highlightedLines, prefix+renderedLine)
 	}
 	content := strings.Join(highlightedLines, "\n")
 
-	help := a.styles.GetHelp().Render("↑/↓: Scroll • PageUp/PageDown: Page • Home/End: Top/Bottom • Esc: Back • q: Quit")
+	// Prompt for search/jump input mode
+	var inputPrompt string
+	if a.searchInputMode {
+		inputPrompt = a.styles.GetHelp().Render("/" + a.searchInputBuffer + "_  (Enter: search, n/N: next/prev match, Esc: reset)")
+	} else if a.jumpInputMode {
+		inputPrompt = a.styles.GetHelp().Render(":" + a.jumpInputBuffer + "_  (Enter to jump / Esc to cancel)")
+	} else if a.searchActiveQuery != "" {
+		inputPrompt = a.styles.GetHelp().Render("n/N: next/prev match, Esc: reset")
+	}
+
+	help := a.styles.GetHelp().Render("↑/↓: Scroll • PageUp/PageDown: Page UpDown • g/G: Top/Bottom • q: Quit • / to search :n to jump")
 
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
 		header,
 		content,
+		inputPrompt,
 		help,
 	)
 }

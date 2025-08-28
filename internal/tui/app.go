@@ -92,9 +92,13 @@ func (c *JobsCache) Cleanup() {
 
 // App represents the main application state
 type App struct {
-	client *github.Client
-	owner  string
-	repo   string
+	// 検索機能
+	searchInputMode   bool
+	searchInputBuffer string
+	searchActiveQuery string // 検索確定後もハイライト用
+	client            *github.Client
+	owner             string
+	repo              string
 
 	// UI state
 	viewState ViewState
@@ -387,6 +391,43 @@ func (a *App) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// --- WorkflowRunLogsView ---
 	if a.viewState == WorkflowRunLogsView {
+		// 検索入力モード
+		if a.searchInputMode {
+			switch msg.Type {
+			case tea.KeyRunes:
+				a.searchInputBuffer += msg.String()
+			case tea.KeyBackspace:
+				if len(a.searchInputBuffer) > 0 {
+					a.searchInputBuffer = a.searchInputBuffer[:len(a.searchInputBuffer)-1]
+				}
+			case tea.KeyEnter:
+				// 検索して最初の一致行にジャンプ
+				lines := strings.Split(a.logs, "\n")
+				query := a.searchInputBuffer
+				for i, line := range lines {
+					if strings.Contains(strings.ToLower(line), strings.ToLower(query)) {
+						// 画面の先頭に来るように
+						maxOffset := len(lines) - (a.height - 6)
+						if maxOffset < 0 {
+							maxOffset = 0
+						}
+						offset := i
+						if offset > maxOffset {
+							offset = maxOffset
+						}
+						a.logOffset = offset
+						break
+					}
+				}
+				a.searchInputMode = false
+				a.searchActiveQuery = a.searchInputBuffer // ハイライト維持
+			case tea.KeyEsc:
+				a.searchInputMode = false
+				a.searchInputBuffer = ""
+				a.searchActiveQuery = "" // エスケープ時は必ずハイライトも消す
+			}
+			return a, nil
+		}
 		// ジャンプ入力モード
 		if a.jumpInputMode {
 			switch msg.Type {
@@ -420,6 +461,12 @@ func (a *App) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return a, nil
 		}
+		// /で検索入力モード開始
+		if msg.String() == "/" {
+			a.searchInputMode = true
+			a.searchInputBuffer = ""
+			return a, nil
+		}
 		// :でジャンプ入力モード開始
 		if msg.String() == ":" {
 			a.jumpInputMode = true
@@ -429,8 +476,9 @@ func (a *App) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch {
 		case key.Matches(msg, a.keyMap.Left):
 			return a.goBack()
+		case msg.Type == tea.KeyEsc:
+			a.searchActiveQuery = "" // エスケープ時はハイライトも消す
 		}
-
 		// 通常のログナビゲーション
 		return a.handleLogNavigation(msg)
 	}
@@ -956,9 +1004,17 @@ func (a *App) renderWorkflowRunLogsView() string {
 	// 例: " 123 | " なら lineNumberWidth+3
 	sepLen := a.width - (lineNumberWidth + 3) - 2 // 2は左右の余白分の目安
 	if sepLen < 10 {
-		sepLen = 10 // 最低長さ
+		sepLen = 10
 	}
 	sepStr := strings.Repeat("─", sepLen)
+
+	// 検索ワードハイライト用
+	var searchQuery string
+	if a.searchInputMode && a.searchInputBuffer != "" {
+		searchQuery = a.searchInputBuffer
+	} else if a.searchActiveQuery != "" {
+		searchQuery = a.searchActiveQuery
+	}
 
 	for i, line := range visibleLines {
 		lineNum := start + i + 1
@@ -970,23 +1026,38 @@ func (a *App) renderWorkflowRunLogsView() string {
 			sep := lipgloss.NewStyle().Foreground(lipgloss.Color("36")).Bold(true).Render(sepStr)
 			highlightedLines = append(highlightedLines, sep)
 		}
-		highlightedLines = append(highlightedLines, prefix+a.applySimpleHighlight(line))
+
+		// 検索ワードがあれば黄色でハイライト
+		renderedLine := a.applySimpleHighlight(line)
+		if searchQuery != "" {
+			idx := strings.Index(strings.ToLower(renderedLine), strings.ToLower(searchQuery))
+			if idx >= 0 {
+				before := renderedLine[:idx]
+				match := renderedLine[idx : idx+len(searchQuery)]
+				after := renderedLine[idx+len(searchQuery):]
+				match = lipgloss.NewStyle().Foreground(lipgloss.Color("226")).Bold(true).Render(match)
+				renderedLine = before + match + after
+			}
+		}
+		highlightedLines = append(highlightedLines, prefix+renderedLine)
 	}
 	content := strings.Join(highlightedLines, "\n")
 
-	// ジャンプ入力モード時のプロンプト
-	var jumpPrompt string
-	if a.jumpInputMode {
-		jumpPrompt = a.styles.GetHelp().Render(":" + a.jumpInputBuffer + "_  (Enter to jump / Esc to cancel)")
+	// Prompt for search/jump input mode (English)
+	var inputPrompt string
+	if a.searchInputMode {
+		inputPrompt = a.styles.GetHelp().Render("/" + a.searchInputBuffer + "_  (Enter to search / Esc to cancel)")
+	} else if a.jumpInputMode {
+		inputPrompt = a.styles.GetHelp().Render(":" + a.jumpInputBuffer + "_  (Enter to jump / Esc to cancel)")
 	}
 
-	help := a.styles.GetHelp().Render("↑/↓: Scroll • PageUp/PageDown: Page UpDown • g/G: Top/Bottom • Esc: Back • q: Quit • :n to jump to line n")
+	help := a.styles.GetHelp().Render("↑/↓: Scroll • PageUp/PageDown: Page UpDown • g/G: Top/Bottom • Esc: Back • q: Quit • / to search :n to jump")
 
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
 		header,
 		content,
-		jumpPrompt,
+		inputPrompt,
 		help,
 	)
 }

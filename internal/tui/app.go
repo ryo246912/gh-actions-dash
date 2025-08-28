@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -145,6 +146,10 @@ type App struct {
 	debounceTimer *time.Timer
 	pendingRunID  int64
 	debounceMutex sync.Mutex
+
+	// Log jump input mode(行ジャンプ入力モード)
+	jumpInputMode   bool
+	jumpInputBuffer string
 }
 
 // NewApp creates a new TUI application
@@ -374,10 +379,59 @@ func (a *App) View() string {
 
 // handleKeyMsg handles keyboard input
 func (a *App) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// --- グローバルキー ---
 	switch {
 	case key.Matches(msg, a.keyMap.Quit):
 		return a, tea.Quit
+	}
 
+	// --- WorkflowRunLogsView ---
+	if a.viewState == WorkflowRunLogsView {
+		// ジャンプ入力モード
+		if a.jumpInputMode {
+			switch msg.Type {
+			case tea.KeyRunes:
+				r := msg.String()
+				if r >= "0" && r <= "9" {
+					a.jumpInputBuffer += r
+				}
+			case tea.KeyBackspace:
+				if len(a.jumpInputBuffer) > 0 {
+					a.jumpInputBuffer = a.jumpInputBuffer[:len(a.jumpInputBuffer)-1]
+				}
+			case tea.KeyEnter:
+				if n, err := strconv.Atoi(a.jumpInputBuffer); err == nil && n > 0 {
+					lines := strings.Split(a.logs, "\n")
+					maxOffset := len(lines) - (a.height - 6)
+					if maxOffset < 0 {
+						maxOffset = 0
+					}
+					offset := n - 1
+					if offset > maxOffset {
+						offset = maxOffset
+					}
+					a.logOffset = offset
+				}
+				a.jumpInputMode = false
+				a.jumpInputBuffer = ""
+			case tea.KeyEsc:
+				a.jumpInputMode = false
+				a.jumpInputBuffer = ""
+			}
+			return a, nil
+		}
+		// :でジャンプ入力モード開始
+		if msg.String() == ":" {
+			a.jumpInputMode = true
+			a.jumpInputBuffer = ""
+			return a, nil
+		}
+		// 通常のログナビゲーション
+		return a.handleLogNavigation(msg)
+	}
+
+	// --- それ以外のビュー ---
+	switch {
 	case key.Matches(msg, a.keyMap.Back):
 		return a.goBack()
 
@@ -406,12 +460,6 @@ func (a *App) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, a.keyMap.PrevPage):
 		return a.handlePrevPage()
-
-	}
-
-	// Handle log scrolling for logs view
-	if a.viewState == WorkflowRunLogsView {
-		return a.handleLogNavigation(msg)
 	}
 
 	// Pass navigation keys to the active list
@@ -906,12 +954,19 @@ func (a *App) renderWorkflowRunLogsView() string {
 	}
 	content := strings.Join(highlightedLines, "\n")
 
-	help := a.styles.GetHelp().Render("↑/↓: Scroll • PageUp/PageDown: Page • Home/End: Top/Bottom • Esc: Back • q: Quit")
+	// ジャンプ入力モード時のプロンプト
+	var jumpPrompt string
+	if a.jumpInputMode {
+		jumpPrompt = a.styles.GetHelp().Render(":" + a.jumpInputBuffer + "_  (Enterでジャンプ/Escでキャンセル)")
+	}
+
+	help := a.styles.GetHelp().Render("↑/↓: Scroll • PageUp/PageDown: Page • Home/End: Top/Bottom • Esc: Back • q: Quit • :nでn行目ジャンプ")
 
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
 		header,
 		content,
+		jumpPrompt,
 		help,
 	)
 }

@@ -949,11 +949,28 @@ func (a *App) renderWorkflowRunLogsView() string {
 
 	highlightedLines := make([]string, len(visibleLines))
 	lineNumberWidth := len(fmt.Sprintf("%d", len(lines))) // 桁数揃え
+	stepGroupPrefix := "##[group]Run "
+
+	// 区切り線の長さを計算
+	// header(タイトル)やhelp分を除いた幅、行番号+区切り記号分も除く
+	// 例: " 123 | " なら lineNumberWidth+3
+	sepLen := a.width - (lineNumberWidth + 3) - 2 // 2は左右の余白分の目安
+	if sepLen < 10 {
+		sepLen = 10 // 最低長さ
+	}
+	sepStr := strings.Repeat("─", sepLen)
+
 	for i, line := range visibleLines {
 		lineNum := start + i + 1
 		// 行番号をつける
 		prefix := fmt.Sprintf("%*d | ", lineNumberWidth, lineNum)
-		highlightedLines[i] = prefix + a.applySimpleHighlight(line)
+
+		trimmed := strings.TrimSpace(line)
+		if strings.Contains(trimmed, stepGroupPrefix) {
+			sep := lipgloss.NewStyle().Foreground(lipgloss.Color("36")).Bold(true).Render(sepStr)
+			highlightedLines = append(highlightedLines, sep)
+		}
+		highlightedLines = append(highlightedLines, prefix+a.applySimpleHighlight(line))
 	}
 	content := strings.Join(highlightedLines, "\n")
 

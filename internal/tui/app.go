@@ -947,10 +947,13 @@ func (a *App) renderWorkflowRunLogsView() string {
 
 	visibleLines := lines[start:end]
 
-	// Apply simple highlighting to lines
 	highlightedLines := make([]string, len(visibleLines))
+	lineNumberWidth := len(fmt.Sprintf("%d", len(lines))) // 桁数揃え
 	for i, line := range visibleLines {
-		highlightedLines[i] = a.applySimpleHighlight(line)
+		lineNum := start + i + 1
+		// 行番号をつける
+		prefix := fmt.Sprintf("%*d | ", lineNumberWidth, lineNum)
+		highlightedLines[i] = prefix + a.applySimpleHighlight(line)
 	}
 	content := strings.Join(highlightedLines, "\n")
 

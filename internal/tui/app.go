@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -98,9 +99,18 @@ type App struct {
 	searchActiveQuery  string // 検索確定後もハイライト用
 	searchMatchIndices []int  // 検索ヒット行番号リスト
 	searchMatchIndex   int    // 現在のヒットインデックス
-	client             *github.Client
-	owner              string
-	repo               string
+
+	// workflow file閲覧モード
+	viewingWorkflowFile bool
+	workflowFileContent string
+	workflowFilePath    string
+	workflowFileRef     string // 取得したref(短縮表示用にも利用)
+	workflowFileLoading bool
+	workflowFileOffset  int               // スクロール位置
+	workflowFileCache   map[string]string // key: path@ref -> content
+	client              *github.Client
+	owner               string
+	repo                string
 
 	// UI state
 	viewState ViewState
@@ -191,24 +201,25 @@ func NewApp(client *github.Client, owner, repo string) *App {
 	previewPanel := components.NewPreviewPanel(styles)
 
 	return &App{
-		client:           client,
-		owner:            owner,
-		repo:             repo,
-		viewState:        AllRunsView,
-		keyMap:           keyMap,
-		styles:           styles,
-		help:             help.New(),
-		workflowList:     workflowList,
-		runsList:         runsList,
-		allRunsList:      allRunsList,
-		previewPanel:     previewPanel,
-		logProcessor:     logs.NewProcessor(styles.GetContent()),
-		loading:          true,
-		workflowsPage:    1,
-		workflowsPerPage: 100,
-		allRunsPage:      1,
-		allRunsPerPage:   100,
-		jobsCache:        NewJobsCache(10 * time.Minute),
+		client:            client,
+		owner:             owner,
+		repo:              repo,
+		viewState:         AllRunsView,
+		keyMap:            keyMap,
+		styles:            styles,
+		help:              help.New(),
+		workflowList:      workflowList,
+		runsList:          runsList,
+		allRunsList:       allRunsList,
+		previewPanel:      previewPanel,
+		logProcessor:      logs.NewProcessor(styles.GetContent()),
+		loading:           true,
+		workflowsPage:     1,
+		workflowsPerPage:  100,
+		allRunsPage:       1,
+		allRunsPerPage:    100,
+		jobsCache:         NewJobsCache(10 * time.Minute),
+		workflowFileCache: make(map[string]string),
 	}
 }
 
@@ -303,6 +314,20 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, a.loadWorkflowRunJobs(a.allRuns[0].ID)
 		}
 		return a, nil
+	case workflowFileLoadedMsg:
+		a.workflowFileLoading = false
+		a.workflowFilePath = msg.path
+		a.workflowFileRef = msg.ref
+		if msg.err != nil {
+			a.workflowFileContent = "Failed to fetch workflow file: " + msg.err.Error()
+		} else {
+			// 正常取得時のみキャッシュに格納
+			key := msg.path + "@" + msg.ref
+			a.workflowFileCache[key] = msg.content
+			a.workflowFileContent = msg.content
+		}
+		a.viewingWorkflowFile = true
+		return a, nil
 	}
 
 	return a.updateLists(msg)
@@ -365,6 +390,10 @@ func (a *App) View() string {
 		return a.renderError(a.err)
 	}
 
+	if a.viewingWorkflowFile {
+		return a.renderWorkflowFileView()
+	}
+
 	if a.loading {
 		return a.styles.GetStatusInProgress().Render("Loading...")
 	}
@@ -391,10 +420,89 @@ func (a *App) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, tea.Quit
 	}
 
-	// --- WorkflowRunLogsView ---
+	// Workflow file view
+	if a.viewingWorkflowFile {
+		if msg.Type == tea.KeyEsc || key.Matches(msg, a.keyMap.Left) {
+			a.viewingWorkflowFile = false
+			a.workflowFileContent = ""
+			a.workflowFilePath = ""
+			a.workflowFileOffset = 0
+			return a, nil
+		}
+		if a.workflowFileLoading { // ignore keys while loading
+			return a, nil
+		}
+
+		lines := strings.Split(a.workflowFileContent, "\n")
+		viewHeight := a.height - 4
+		if viewHeight < 1 {
+			viewHeight = 1
+		}
+		maxOffset := len(lines) - viewHeight
+		if maxOffset < 0 {
+			maxOffset = 0
+		}
+
+		switch {
+		case key.Matches(msg, a.keyMap.Up):
+			if a.workflowFileOffset > 0 {
+				a.workflowFileOffset--
+			}
+		case key.Matches(msg, a.keyMap.Down):
+			if a.workflowFileOffset < maxOffset {
+				a.workflowFileOffset++
+			}
+		case key.Matches(msg, a.keyMap.PageUp):
+			a.workflowFileOffset -= viewHeight
+			if a.workflowFileOffset < 0 {
+				a.workflowFileOffset = 0
+			}
+		case key.Matches(msg, a.keyMap.PageDown):
+			a.workflowFileOffset += viewHeight
+			if a.workflowFileOffset > maxOffset {
+				a.workflowFileOffset = maxOffset
+			}
+		case key.Matches(msg, a.keyMap.Home) || msg.String() == "g":
+			a.workflowFileOffset = 0
+		case key.Matches(msg, a.keyMap.End) || msg.String() == "G":
+			a.workflowFileOffset = maxOffset
+		}
+		return a, nil
+	}
+
+	// Logs view
 	if a.viewState == WorkflowRunLogsView {
 		// 検索入力モード
-		if a.searchInputMode {
+		if (msg.String() == "f" || key.Matches(msg, a.keyMap.Right)) && a.currentRun != nil {
+			path := a.currentRun.Path
+			ref := a.currentRun.HeadSha
+			if path == "" && a.currentWorkflow != nil { // fallback
+				path = a.currentWorkflow.Path
+			}
+			if path != "" && ref != "" {
+				key := path + "@" + ref
+				if cached, ok := a.workflowFileCache[key]; ok { // キャッシュヒット
+					a.workflowFileContent = cached
+					a.workflowFilePath = path
+					a.workflowFileRef = ref
+					a.workflowFileLoading = false
+					a.viewingWorkflowFile = true
+					return a, nil
+				}
+				// キャッシュなし: 非同期取得
+				a.workflowFileLoading = true
+				a.workflowFileContent = ""
+				a.workflowFilePath = path
+				a.workflowFileRef = ref
+				a.viewingWorkflowFile = true
+				return a, func() tea.Msg {
+					content, err := a.client.GetWorkflowFileAtRef(a.owner, a.repo, path, ref)
+					return workflowFileLoadedMsg{content: content, path: path, ref: ref, err: err}
+				}
+			}
+		}
+
+		if a.searchInputMode { // search input
 			switch msg.Type {
 			case tea.KeyRunes:
 				a.searchInputBuffer += msg.String()
@@ -521,38 +629,29 @@ func (a *App) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				a.logOffset = offset
 			}
 		}
-		// 通常のログナビゲーション
 		return a.handleLogNavigation(msg)
 	}
 
-	// --- それ以外のビュー ---
+	// Other views
 	switch {
 	case key.Matches(msg, a.keyMap.Back):
 		return a.goBack()
-
 	case key.Matches(msg, a.keyMap.Enter):
 		return a.handleEnter()
-
 	case key.Matches(msg, a.keyMap.Refresh):
 		return a.refresh()
-
 	case msg.String() == "w":
 		return a.switchToWorkflowsView()
-
 	case msg.String() == "a":
 		return a.switchToAllRunsView()
-
 	case key.Matches(msg, a.keyMap.Right):
 		return a.handleEnter()
-
 	case key.Matches(msg, a.keyMap.NextPage):
 		return a.handleNextPage()
-
 	case key.Matches(msg, a.keyMap.PrevPage):
 		return a.handlePrevPage()
 	}
 
-	// Pass navigation keys to the active list
 	return a.updateLists(msg)
 }
 
@@ -1095,7 +1194,7 @@ func (a *App) renderWorkflowRunLogsView() string {
 		inputPrompt = a.styles.GetHelp().Render("n/N: next/prev match, Esc: reset")
 	}
 
-	help := a.styles.GetHelp().Render("↑/↓: Scroll • PageUp/PageDown: Page UpDown • g/G: Top/Bottom • q: Quit • / to search :n to jump")
+	help := a.styles.GetHelp().Render("↑/↓: Scroll • PageUp/PageDown: Page UpDown • g/G: Top/Bottom • q: Quit • / to search :n to jump・ f|→: View workflow file")
 
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
@@ -1104,6 +1203,45 @@ func (a *App) renderWorkflowRunLogsView() string {
 		inputPrompt,
 		help,
 	)
+}
+
+func (a *App) renderWorkflowFileView() string {
+	title := "Workflow File"
+	if a.workflowFilePath != "" {
+		title = fmt.Sprintf("Workflow File: %s", a.workflowFilePath)
+	}
+	header := a.styles.GetTitle().Render(title)
+	var body string
+	if a.workflowFileLoading {
+		body = a.styles.GetStatusInProgress().Render("Loading workflow file...")
+	} else if a.workflowFileContent == "" {
+		body = a.styles.GetHelp().Render("(empty file)")
+	} else {
+		lines := strings.Split(a.workflowFileContent, "\n")
+		viewHeight := a.height - 4 // header + help
+		if viewHeight < 1 {
+			viewHeight = 1
+		}
+		start := a.workflowFileOffset
+		end := start + viewHeight
+		if start > len(lines) {
+			start = len(lines)
+		}
+		if end > len(lines) {
+			end = len(lines)
+		}
+		visibleRaw := lines[start:end]
+		digits := len(fmt.Sprintf("%d", len(lines)))
+		visible := make([]string, len(visibleRaw))
+		for i, raw := range visibleRaw {
+			high := a.applyYAMLHighlight(raw)
+			ln := start + i + 1
+			visible[i] = fmt.Sprintf("%*d | %s", digits, ln, high)
+		}
+		body = lipgloss.NewStyle().Width(a.width - 4).Render(strings.Join(visible, "\n"))
+	}
+	help := a.styles.GetHelp().Render("Esc|←: Close • ↑/↓ PgUp/PgDn g/G: Scroll • q: Quit")
+	return lipgloss.JoinVertical(lipgloss.Left, header, body, help)
 }
 
 // Messages
@@ -1141,6 +1279,14 @@ type allRunsPaginatedLoadedMsg struct {
 	runs  []models.WorkflowRun
 	total int
 	page  int
+}
+
+// workflow file load result
+type workflowFileLoadedMsg struct {
+	content string
+	path    string
+	ref     string
+	err     error
 }
 
 // Commands
@@ -1397,4 +1543,57 @@ func (a *App) renderError(err error) string {
 
 	// Fallback for non-GitHub errors
 	return a.styles.StatusFailure.Render(fmt.Sprintf("❌ エラー: %s", err.Error()))
+}
+
+// applyYAMLHighlight provides simple inline YAML syntax highlighting.
+func (a *App) applyYAMLHighlight(line string) string {
+	trimmed := strings.TrimRight(line, "\r")
+	if strings.TrimSpace(trimmed) == "" {
+		return trimmed
+	}
+
+	// Separate comment portion
+	comment := ""
+	codePart := trimmed
+	if idx := strings.Index(codePart, "#"); idx >= 0 {
+		comment = codePart[idx:]
+		codePart = codePart[:idx]
+	}
+
+	// Monokai Extended palette
+	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("197")).Bold(true)
+	strStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("223"))
+	boolStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("141")).Bold(true)
+	numStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("148"))
+	commentStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("59")).Italic(true)
+
+	// Key (supports leading spaces and list dash)
+	keyRegex := regexp.MustCompile(`^([ \t-]*)([A-Za-z0-9_."'\-]+):(.*)$`)
+	if m := keyRegex.FindStringSubmatch(codePart); m != nil {
+		prefix, k, rest := m[1], m[2], m[3]
+		codePart = prefix + keyStyle.Render(k) + ":" + rest
+	}
+
+	// Strings
+	strRegex := regexp.MustCompile(`"[^"\\]*(?:\\.[^"\\]*)*"|'[^'\\]*(?:\\.[^'\\]*)*'`)
+	codePart = strRegex.ReplaceAllStringFunc(codePart, func(s string) string { return strStyle.Render(s) })
+
+	// Booleans / null
+	boolRegex := regexp.MustCompile(`\b(true|false|null)\b`)
+	codePart = boolRegex.ReplaceAllStringFunc(codePart, func(s string) string { return boolStyle.Render(s) })
+
+	// Numbers (simpler: match standalone numeric tokens with optional % following)
+	numRegex := regexp.MustCompile(`(^|[ \t:,\[\{])(-?\d+(?:\.\d+)?%?)([ \t,\]\}]|$)`)
+	codePart = numRegex.ReplaceAllStringFunc(codePart, func(m string) string {
+		sub := numRegex.FindStringSubmatch(m)
+		if len(sub) < 4 {
+			return m
+		}
+		return sub[1] + numStyle.Render(sub[2]) + sub[3]
+	})
+
+	if comment != "" {
+		codePart += commentStyle.Render(comment)
+	}
+	return codePart
 }

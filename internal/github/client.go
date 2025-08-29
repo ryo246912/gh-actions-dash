@@ -3,6 +3,9 @@ package github
 import (
 	"archive/zip"
 	"bytes"
+	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -578,4 +581,45 @@ func (c *Client) getJobStepInfo(owner, repo string, runID int64) (string, error)
 	}
 
 	return logContent.String(), nil
+}
+
+// GetWorkflowFileAtRef fetches the workflow file content (YAML) at a specific ref (commit SHA or branch)
+func (c *Client) GetWorkflowFileAtRef(owner, repo, path, ref string) (string, error) {
+	endpoint := fmt.Sprintf("repos/%s/%s/contents/%s?ref=%s", owner, repo, path, ref)
+	httpClient, err := api.DefaultHTTPClient()
+	if err != nil {
+		return "", categorizeError(err)
+	}
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://api.github.com/"+endpoint, nil)
+	if err != nil {
+		return "", categorizeError(err)
+	}
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return "", categorizeError(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return "", categorizeError(fmt.Errorf("status %d", resp.StatusCode))
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", categorizeError(err)
+	}
+	var data struct {
+		Content  string `json:"content"`
+		Encoding string `json:"encoding"`
+	}
+	if err := json.Unmarshal(body, &data); err != nil {
+		return "", categorizeError(err)
+	}
+	if data.Encoding != "base64" {
+		return "", categorizeError(fmt.Errorf("unexpected encoding %s", data.Encoding))
+	}
+	decoded, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(data.Content, "\n", ""))
+	if err != nil {
+		return "", categorizeError(err)
+	}
+	return string(decoded), nil
 }

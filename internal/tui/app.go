@@ -104,8 +104,10 @@ type App struct {
 	viewingWorkflowFile bool
 	workflowFileContent string
 	workflowFilePath    string
+	workflowFileRef     string // 取得したref(短縮表示用にも利用)
 	workflowFileLoading bool
-	workflowFileOffset  int // スクロール位置
+	workflowFileOffset  int               // スクロール位置
+	workflowFileCache   map[string]string // key: path@ref -> content
 	client              *github.Client
 	owner               string
 	repo                string
@@ -199,24 +201,25 @@ func NewApp(client *github.Client, owner, repo string) *App {
 	previewPanel := components.NewPreviewPanel(styles)
 
 	return &App{
-		client:           client,
-		owner:            owner,
-		repo:             repo,
-		viewState:        AllRunsView,
-		keyMap:           keyMap,
-		styles:           styles,
-		help:             help.New(),
-		workflowList:     workflowList,
-		runsList:         runsList,
-		allRunsList:      allRunsList,
-		previewPanel:     previewPanel,
-		logProcessor:     logs.NewProcessor(styles.GetContent()),
-		loading:          true,
-		workflowsPage:    1,
-		workflowsPerPage: 100,
-		allRunsPage:      1,
-		allRunsPerPage:   100,
-		jobsCache:        NewJobsCache(10 * time.Minute),
+		client:            client,
+		owner:             owner,
+		repo:              repo,
+		viewState:         AllRunsView,
+		keyMap:            keyMap,
+		styles:            styles,
+		help:              help.New(),
+		workflowList:      workflowList,
+		runsList:          runsList,
+		allRunsList:       allRunsList,
+		previewPanel:      previewPanel,
+		logProcessor:      logs.NewProcessor(styles.GetContent()),
+		loading:           true,
+		workflowsPage:     1,
+		workflowsPerPage:  100,
+		allRunsPage:       1,
+		allRunsPerPage:    100,
+		jobsCache:         NewJobsCache(10 * time.Minute),
+		workflowFileCache: make(map[string]string),
 	}
 }
 
@@ -313,8 +316,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 	case workflowFileLoadedMsg:
 		a.workflowFileLoading = false
-		a.workflowFileContent = msg.content
 		a.workflowFilePath = msg.path
+		a.workflowFileRef = msg.ref
+		if msg.err != nil {
+			a.workflowFileContent = "Failed to fetch workflow file: " + msg.err.Error()
+		} else {
+			// 正常取得時のみキャッシュに格納
+			key := msg.path + "@" + msg.ref
+			a.workflowFileCache[key] = msg.content
+			a.workflowFileContent = msg.content
+		}
 		a.viewingWorkflowFile = true
 		return a, nil
 	}
@@ -469,16 +480,24 @@ func (a *App) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				path = a.currentWorkflow.Path
 			}
 			if path != "" && ref != "" {
+				key := path + "@" + ref
+				if cached, ok := a.workflowFileCache[key]; ok { // キャッシュヒット
+					a.workflowFileContent = cached
+					a.workflowFilePath = path
+					a.workflowFileRef = ref
+					a.workflowFileLoading = false
+					a.viewingWorkflowFile = true
+					return a, nil
+				}
+				// キャッシュなし: 非同期取得
 				a.workflowFileLoading = true
 				a.workflowFileContent = ""
 				a.workflowFilePath = path
+				a.workflowFileRef = ref
 				a.viewingWorkflowFile = true
 				return a, func() tea.Msg {
 					content, err := a.client.GetWorkflowFileAtRef(a.owner, a.repo, path, ref)
-					if err != nil {
-						return workflowFileLoadedMsg{content: "Failed to fetch workflow file: " + err.Error(), path: path}
-					}
-					return workflowFileLoadedMsg{content: content, path: path}
+					return workflowFileLoadedMsg{content: content, path: path, ref: ref, err: err}
 				}
 			}
 		}
@@ -1266,6 +1285,8 @@ type allRunsPaginatedLoadedMsg struct {
 type workflowFileLoadedMsg struct {
 	content string
 	path    string
+	ref     string
+	err     error
 }
 
 // Commands

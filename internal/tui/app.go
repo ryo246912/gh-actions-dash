@@ -126,6 +126,7 @@ type App struct {
 	currentRun      *models.WorkflowRun
 	currentJobs     []models.Job
 	logs            string
+	logsCache       map[int64]string // runID -> logs (session cache)
 
 	// Lists
 	workflowList list.Model
@@ -219,6 +220,7 @@ func NewApp(client *github.Client, owner, repo string) *App {
 		allRunsPage:       1,
 		allRunsPerPage:    100,
 		jobsCache:         NewJobsCache(10 * time.Minute),
+		logsCache:         make(map[int64]string),
 		workflowFileCache: make(map[string]string),
 	}
 }
@@ -756,6 +758,8 @@ func (a *App) refresh() (tea.Model, tea.Cmd) {
 		if a.currentRun != nil {
 			a.logOffset = 0
 			a.logs = ""
+			// 強制再取得のためキャッシュ削除
+			delete(a.logsCache, a.currentRun.ID)
 			return a, a.loadWorkflowRunLogs(a.currentRun.ID)
 		}
 	}
@@ -1322,10 +1326,16 @@ func (a *App) loadWorkflowRuns(workflowID int64) tea.Cmd {
 
 func (a *App) loadWorkflowRunLogs(runID int64) tea.Cmd {
 	return tea.Cmd(func() tea.Msg {
+		// キャッシュヒット時は即返す
+		if cached, ok := a.logsCache[runID]; ok {
+			return logsLoadedMsg{logs: cached}
+		}
 		logs, err := a.client.GetWorkflowRunLogs(a.owner, a.repo, runID)
 		if err != nil {
 			return errorMsg{err: err}
 		}
+		// キャッシュ保存
+		a.logsCache[runID] = logs
 		return logsLoadedMsg{logs: logs}
 	})
 }

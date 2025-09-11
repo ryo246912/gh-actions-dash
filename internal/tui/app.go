@@ -416,6 +416,14 @@ func (a *App) View() string {
 
 // handleKeyMsg handles keyboard input
 func (a *App) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// 入力モード中は専用の処理のみ実行
+	if a.searchInputMode {
+		return a.handleSearchInput(msg)
+	}
+	if a.jumpInputMode {
+		return a.handleJumpInput(msg)
+	}
+
 	// --- グローバルキー ---
 	switch {
 	case key.Matches(msg, a.keyMap.Quit):
@@ -504,83 +512,6 @@ func (a *App) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		if a.searchInputMode { // search input
-			switch msg.Type {
-			case tea.KeyRunes:
-				a.searchInputBuffer += msg.String()
-			case tea.KeyBackspace:
-				if len(a.searchInputBuffer) > 0 {
-					a.searchInputBuffer = a.searchInputBuffer[:len(a.searchInputBuffer)-1]
-				}
-			case tea.KeyEnter:
-				// 検索して一致行リストを作成し、最初の一致行にジャンプ
-				lines := strings.Split(a.logs, "\n")
-				query := a.searchInputBuffer
-				a.searchMatchIndices = nil
-				for i, line := range lines {
-					if strings.Contains(strings.ToLower(line), strings.ToLower(query)) {
-						a.searchMatchIndices = append(a.searchMatchIndices, i)
-					}
-				}
-				if len(a.searchMatchIndices) > 0 {
-					a.searchMatchIndex = 0
-					// 画面の先頭に来るように
-					maxOffset := len(lines) - (a.height - 6)
-					if maxOffset < 0 {
-						maxOffset = 0
-					}
-					offset := a.searchMatchIndices[0]
-					if offset > maxOffset {
-						offset = maxOffset
-					}
-					a.logOffset = offset
-				} else {
-					a.searchMatchIndex = -1
-				}
-				a.searchInputMode = false
-				a.searchActiveQuery = a.searchInputBuffer // ハイライト維持
-			case tea.KeyEsc:
-				a.searchInputMode = false
-				a.searchInputBuffer = ""
-				a.searchActiveQuery = "" // エスケープ時は必ずハイライトも消す
-				a.searchMatchIndices = nil
-				a.searchMatchIndex = -1
-			}
-			return a, nil
-		}
-		// ジャンプ入力モード
-		if a.jumpInputMode {
-			switch msg.Type {
-			case tea.KeyRunes:
-				r := msg.String()
-				if r >= "0" && r <= "9" {
-					a.jumpInputBuffer += r
-				}
-			case tea.KeyBackspace:
-				if len(a.jumpInputBuffer) > 0 {
-					a.jumpInputBuffer = a.jumpInputBuffer[:len(a.jumpInputBuffer)-1]
-				}
-			case tea.KeyEnter:
-				if n, err := strconv.Atoi(a.jumpInputBuffer); err == nil && n > 0 {
-					lines := strings.Split(a.logs, "\n")
-					maxOffset := len(lines) - (a.height - 6)
-					if maxOffset < 0 {
-						maxOffset = 0
-					}
-					offset := n - 1
-					if offset > maxOffset {
-						offset = maxOffset
-					}
-					a.logOffset = offset
-				}
-				a.jumpInputMode = false
-				a.jumpInputBuffer = ""
-			case tea.KeyEsc:
-				a.jumpInputMode = false
-				a.jumpInputBuffer = ""
-			}
-			return a, nil
-		}
 		// /で検索入力モード開始
 		if msg.String() == "/" {
 			a.searchInputMode = true
@@ -1606,4 +1537,84 @@ func (a *App) applyYAMLHighlight(line string) string {
 		codePart += commentStyle.Render(comment)
 	}
 	return codePart
+}
+
+// handleSearchInput handles search input mode
+func (a *App) handleSearchInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyRunes:
+		a.searchInputBuffer += msg.String()
+	case tea.KeyBackspace:
+		if len(a.searchInputBuffer) > 0 {
+			a.searchInputBuffer = a.searchInputBuffer[:len(a.searchInputBuffer)-1]
+		}
+	case tea.KeyEnter:
+		// 検索して一致行リストを作成し、最初の一致行にジャンプ
+		lines := strings.Split(a.logs, "\n")
+		query := a.searchInputBuffer
+		a.searchMatchIndices = nil
+		for i, line := range lines {
+			if strings.Contains(strings.ToLower(line), strings.ToLower(query)) {
+				a.searchMatchIndices = append(a.searchMatchIndices, i)
+			}
+		}
+		if len(a.searchMatchIndices) > 0 {
+			a.searchMatchIndex = 0
+			// 画面の先頭に来るように
+			maxOffset := len(lines) - (a.height - 6)
+			if maxOffset < 0 {
+				maxOffset = 0
+			}
+			offset := a.searchMatchIndices[0]
+			if offset > maxOffset {
+				offset = maxOffset
+			}
+			a.logOffset = offset
+		} else {
+			a.searchMatchIndex = -1
+		}
+		a.searchInputMode = false
+		a.searchActiveQuery = a.searchInputBuffer // ハイライト維持
+	case tea.KeyEsc:
+		a.searchInputMode = false
+		a.searchInputBuffer = ""
+		a.searchActiveQuery = "" // エスケープ時は必ずハイライトも消す
+		a.searchMatchIndices = nil
+		a.searchMatchIndex = -1
+	}
+	return a, nil
+}
+
+// handleJumpInput handles jump input mode
+func (a *App) handleJumpInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyRunes:
+		r := msg.String()
+		if r >= "0" && r <= "9" {
+			a.jumpInputBuffer += r
+		}
+	case tea.KeyBackspace:
+		if len(a.jumpInputBuffer) > 0 {
+			a.jumpInputBuffer = a.jumpInputBuffer[:len(a.jumpInputBuffer)-1]
+		}
+	case tea.KeyEnter:
+		if n, err := strconv.Atoi(a.jumpInputBuffer); err == nil && n > 0 {
+			lines := strings.Split(a.logs, "\n")
+			maxOffset := len(lines) - (a.height - 6)
+			if maxOffset < 0 {
+				maxOffset = 0
+			}
+			offset := n - 1
+			if offset > maxOffset {
+				offset = maxOffset
+			}
+			a.logOffset = offset
+		}
+		a.jumpInputMode = false
+		a.jumpInputBuffer = ""
+	case tea.KeyEsc:
+		a.jumpInputMode = false
+		a.jumpInputBuffer = ""
+	}
+	return a, nil
 }

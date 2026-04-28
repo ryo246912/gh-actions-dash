@@ -6,7 +6,6 @@
   "prConcurrentLimit": 5,
   "dependencyDashboard": true,
   "timezone": "Asia/Tokyo",
-  "reviewers": ["ryo246912"],
   "vulnerabilityAlerts": {
     "groupName": null,
     "schedule": [],

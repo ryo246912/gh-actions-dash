@@ -158,7 +158,7 @@ hide        = true
 run         = "taplo format"
 
 [tools]
-actionlint                     = "1.7.7"
+actionlint                     = "1.7.12"
 "aqua:suzuki-shunsuke/ghalint" = "1.5.1"
 golangci-lint                  = "2.1.6"
 "npm:@taplo/cli"               = "0.7.0"

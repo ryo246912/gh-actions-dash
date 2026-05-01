@@ -159,7 +159,7 @@ run         = "taplo format"
 
 [tools]
 actionlint                     = "1.7.7"
-"aqua:suzuki-shunsuke/ghalint" = "1.5.1"
+"aqua:suzuki-shunsuke/ghalint" = "1.5.6"
 golangci-lint                  = "2.1.6"
 "npm:@taplo/cli"               = "0.7.0"
 "npm:prettier"                 = "3.6.0"
